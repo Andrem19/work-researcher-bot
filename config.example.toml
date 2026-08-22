@@ -1,0 +1,101 @@
+# Work Researcher MCP configuration.
+# Copy to config.toml and edit. Secrets can also come from environment
+# variables: REED_API_KEY, ADZUNA_APP_ID, ADZUNA_APP_KEY, JOOBLE_API_KEY.
+
+[general]
+cv_dir = "CV_collection"
+data_dir = "data"
+log_level = "INFO"
+
+[search]
+default_location = "UK"
+default_radius_miles = 40
+default_max_days_old = 14
+default_work_from_home = false
+default_limit_per_source = 25
+provider_timeout_s = 30
+
+# Saved searches: used as search_jobs(profile="..."), extendable in chat.
+[search.profiles.data_analytics]
+query = "Data Analyst"
+alt_queries = ["Data Analytics"]
+location = "UK"
+max_days_old = 7
+
+[search.profiles.field_geologist]
+query = "Field Geologist"
+alt_queries = ["Geologist Engineer", "Engineering Geologist", "Geotechnical Engineer"]
+location = "UK"
+max_days_old = 14
+
+[applicant]
+full_name = ""
+email = ""
+phone = ""
+# Location intelligence: remote jobs are searched UK-wide automatically;
+# hybrid/on-site/field jobs must be within max_commute_miles of home_location
+# (or listed in relocate_areas / willing_to_relocate=true), otherwise the job
+# is flagged location_status=mismatch and penalised.
+home_location = "Blackpool"
+home_postcode = ""                 # optional, improves accuracy (e.g. "FY1 1AA")
+max_commute_miles = 50
+willing_to_relocate = false
+relocate_areas = []                # e.g. ["Manchester", "Leeds"]
+location = "Blackpool, UK"
+right_to_work = "Yes, I have the right to work in the UK"
+notice_period = ""
+salary_expectation = ""
+linkedin = ""
+
+[drive]
+enabled = true
+mode = "oauth"                     # oauth | service_account | off
+account = "ry4ara@gmail.com"
+folder_name = "CV"
+folder_id = ""                     # optional: paste the Drive folder id to skip lookup
+credentials_file = "secrets/google_credentials.json"
+token_file = "secrets/google_token.json"
+service_account_file = "secrets/google_service_account.json"
+
+[browser]
+headless = false                   # headed: user can step in for 2FA/captcha;
+                                   # boards also block headless far more often
+channel = "msedge"                 # real Edge: passes Windows App Control and
+                                   # anti-bot; auto-falls back to bundled Chromium
+default_timeout_ms = 15000
+
+[auth]
+# Pre-approved by the user: the agent may click "Sign in with Google" and pick
+# this account on job boards WITHOUT asking permission (2FA/captcha → ask).
+google_account = "7255591@gmail.com"
+auto_google_signin = true
+
+[blocklist]
+# Seeded into the DB on first use; runtime additions persist in the DB via
+# the manage_blocklist MCP tool ("never apply to X" → add company X here too).
+companies = [
+    # "Penguin Recruitment",
+]
+
+[providers.totaljobs]
+enabled = true
+
+[providers.reed]
+enabled = true
+api_key = ""                       # free: https://www.reed.co.uk/developers
+
+[providers.adzuna]
+enabled = true
+app_id = ""                        # free: https://developer.adzuna.com
+app_key = ""
+
+[providers.jooble]
+enabled = true
+api_key = ""                       # free: https://jooble.org/api/about
+
+[providers.earthworks]
+enabled = true
+uk_only = true
+
+[providers.findajob]
+enabled = false                    # DWP FindAJob currently returns 503

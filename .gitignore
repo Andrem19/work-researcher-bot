@@ -1,0 +1,25 @@
+# Virtual envs / caches
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Runtime data: SQLite DB, browser profile, screenshots, probe junk
+data/
+logs/
+*.part
+*.log
+
+# CVs are personal data synced from Google Drive — not for the repo
+CV_collection/
+
+# Secrets — never commit: real config with API keys, Google OAuth files
+config.toml
+secrets/
+.env
+
+# OS noise
+Thumbs.db
+.DS_Store

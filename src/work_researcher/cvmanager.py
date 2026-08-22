@@ -1,0 +1,184 @@
+"""CV collection manager: local CV_collection + parsed index in SQLite."""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import re
+from pathlib import Path
+
+import aiosqlite
+
+from .config import Settings
+from .textutils import clean
+
+CV_EXTENSIONS = {".docx", ".pdf", ".doc"}
+
+DOMAIN_TAGS = {
+    "data_analytics": [
+        "sql", "tableau", "power bi", "powerbi", "python", "pandas", "excel",
+        "dashboard", "analytics", "data analyst", "data analysis", "etl",
+        "visualization", "visualisation", "machine learning", "statistics",
+        "kpi", "reporting",
+    ],
+    "geology": [
+        "geolog", "geotech", "geoscience", "site investigation", "gis",
+        "drilling", "borehole", "strata", "mineral", "exploration", "logging",
+        "contamination", "hydrogeolog", "rock", "soil", "fieldwork", "mapping",
+        "engineering geologist", "quarry", "aggregates",
+    ],
+    "engineering": [
+        "engineer", "cad", "autocad", "civil", "structural", "mechanical",
+        "project management", "design",
+    ],
+}
+
+_LANG_HINTS = {
+    "en": ("education", "experience", "skills", "summary", "references"),
+    "ru": ("образование", "опыт", "навыки", "резюме", "о себе"),
+}
+
+
+def _extract_docx(path: Path) -> str:
+    from docx import Document
+
+    doc = Document(str(path))
+    parts = [p.text for p in doc.paragraphs if p.text.strip()]
+    for table in doc.tables:
+        for row in table.rows:
+            parts.append(" | ".join(c.text for c in row.cells))
+    return "\n".join(parts)
+
+
+def _extract_pdf(path: Path) -> str:
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(path))
+    return "\n".join((page.extract_text() or "") for page in reader.pages)
+
+
+def extract_text(path: Path) -> str:
+    if path.suffix.lower() == ".docx":
+        return _extract_docx(path)
+    if path.suffix.lower() == ".pdf":
+        return _extract_pdf(path)
+    return ""
+
+
+def classify(text: str) -> list[str]:
+    low = text.lower()
+    tags = []
+    for domain, keywords in DOMAIN_TAGS.items():
+        hits = sum(1 for kw in keywords if kw in low)
+        if hits >= 3 or (hits >= 2 and domain in ("data_analytics", "geology")):
+            tags.append(domain)
+    return tags
+
+
+def detect_language(text: str) -> str | None:
+    low = text.lower()
+    best, best_hits = None, 0
+    for lang, hints in _LANG_HINTS.items():
+        hits = sum(1 for h in hints if h in low)
+        if hits > best_hits:
+            best, best_hits = lang, hits
+    return best
+
+
+_NAME_RE = re.compile(r"^[A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+){1,3}$")
+
+
+def guess_name(text: str) -> str | None:
+    """The first standalone line that looks like a person's full name."""
+    for line in text.splitlines()[:12]:
+        line = clean(line)
+        if 5 <= len(line) <= 45 and _NAME_RE.match(line):
+            if not re.search(r"(cv|curriculum|resume|address|phone|email|profile)", line, re.I):
+                return line
+    return None
+
+
+def scan_local(settings: Settings) -> list[Path]:
+    if not settings.cv_dir.exists():
+        return []
+    return sorted(
+        p for p in settings.cv_dir.iterdir()
+        if p.is_file() and p.suffix.lower() in CV_EXTENSIONS and not p.name.startswith("~$")
+    )
+
+
+async def index_cvs(settings: Settings, force: bool = False) -> dict:
+    """Parse every CV in CV_collection (skipping unchanged files) and upsert."""
+    from . import persistence as db
+
+    files = scan_local(settings)
+    scanned, updated, skipped, failed = 0, 0, 0, 0
+    async with db.connect(settings.db_path) as conn:
+        for path in files:
+            scanned += 1
+            stat = path.stat()
+            key = f"{stat.st_size}:{int(stat.st_mtime)}"
+            cur = await conn.execute(
+                "SELECT mtime FROM cvs WHERE path=?", (str(path),)
+            )
+            row = await cur.fetchone()
+            if row and row["mtime"] == key and not force:
+                skipped += 1
+                continue
+            try:
+                text = await asyncio.to_thread(extract_text, path)
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                await db.upsert_cv(conn, {
+                    "filename": path.name, "path": str(path),
+                    "sha256": None, "size": stat.st_size, "mtime": key,
+                    "text_preview": f"[parse failed: {exc}]", "full_text": "",
+                    "tags": "[]", "language": None, "name_guess": None,
+                })
+                continue
+            updated += 1
+            await db.upsert_cv(conn, {
+                "filename": path.name, "path": str(path),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "size": stat.st_size, "mtime": key,
+                "text_preview": clean(text)[:600], "full_text": text[:20000],
+                "tags": str(classify(text)), "language": detect_language(text),
+                "name_guess": guess_name(text),
+            })
+        await conn.commit()
+    return {
+        "files_found": scanned, "indexed": updated, "unchanged": skipped,
+        "failed": failed, "cv_dir": str(settings.cv_dir),
+    }
+
+
+async def recommend_cv(conn: aiosqlite.Connection, job: dict, limit: int = 3) -> list[dict]:
+    """Rank CVs against a job by domain-tag and keyword overlap."""
+    from .textutils import query_terms, term_coverage
+
+    cur = await conn.execute("SELECT id, filename, tags, full_text, indexed_at FROM cvs")
+    rows = await cur.fetchall()
+    job_text = " ".join(
+        str(job.get(k) or "") for k in ("title", "description", "company", "location_text")
+    )
+    scored = []
+    for r in rows:
+        tags = re.findall(r"[a-z_]+", r["tags"] or "")
+        tag_bonus = 0.0
+        low = job_text.lower()
+        if "data_analytics" in tags and any(
+            w in low for w in ("data", "analyst", "analytics", "bi", "insight")
+        ):
+            tag_bonus += 0.3
+        if "geology" in tags and any(
+            w in low for w in ("geolog", "geotech", "geo", "site investigation", "drilling")
+        ):
+            tag_bonus += 0.3
+        cov = term_coverage(query_terms(job_text)[:15], r["full_text"] or "")
+        score = round(min(1.0, cov + tag_bonus), 2)
+        scored.append({
+            "cv_id": r["id"], "filename": r["filename"], "tags": tags,
+            "score": score, "indexed_at": r["indexed_at"],
+        })
+    scored.sort(key=lambda x: -x["score"])
+    return scored[:limit]
