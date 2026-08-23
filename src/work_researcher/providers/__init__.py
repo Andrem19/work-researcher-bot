@@ -29,10 +29,14 @@ BROWSER_ONLY_NOTES = {
     "glassdoor": "Glassdoor blocks non-browser clients. Browser only.",
     "findajob": "GOV.UK Work Hub (jobs.service.gov.uk/jobs) renders results as "
                 "a JS SPA — HTTP returns a shell. Search with browser_open → "
-                "fill keywords input → Search → run the SCRAPE_LINKS_JS from "
-                "providers/govuk_workhub.py via browser_eval → "
-                "submit_job_observations. Filters: REMOTE/ONSITE/HYBRID/"
-                "FIELD_BASED checkboxes map directly to work_mode.",
+                "fill keywords input (id=keywordsInput) → Search → run the "
+                "SCRAPE_LINKS_JS from providers/govuk_workhub.py via "
+                "browser_eval → submit_job_observations. Filters: "
+                "REMOTE/ONSITE/HYBRID/FIELD_BASED checkboxes map to work_mode. "
+                "Apply: 'Apply for this job' → 'Before you apply' → "
+                "'Continue to the employer\\'s website' (Work Hub does NOT "
+                "host its own application form). Login: GOV.UK One Login "
+                "(email + confirmation code, NOT Google SSO).",
 }
 
 

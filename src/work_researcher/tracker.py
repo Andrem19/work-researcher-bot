@@ -43,10 +43,13 @@ PLAYBOOKS: dict[str, str] = {
         "usually an email address or external portal; follow the page text."
     ),
     "findajob": (
-        "GOV.UK Work Hub (jobs.service.gov.uk): job page → scroll for the "
-        "description. Apply: the button links to the employer's external site "
-        "or the civil-service application portal. Sign in via gov.uk account "
-        "(email/password or GOV.UK One Login — NOT Google SSO)."
+        "GOV.UK Work Hub (jobs.service.gov.uk): the 'Apply for this job' "
+        "button opens a 'Before you apply' page → click 'Continue to the "
+        "employer's website' — Work Hub does NOT host its own application "
+        "form; it redirects to the employer's external site (NHS Jobs, "
+        "council portals, etc.). Sign in via GOV.UK One Login (email + "
+        "confirmation code, NOT Google SSO) — needed to reach the apply "
+        "button. On the employer site: upload CV, fill form, submit."
     ),
     "website_form": (
         "Employer career sites (Workday/SmartRecruiters/Greenhouse/iCIMS): "
@@ -77,8 +80,12 @@ def _apply_method(job: dict) -> tuple[str, str | None, list[str]]:
                 ["Earthworks posts link to the employer/agency instructions — read the page"])
     if source == "findajob":
         return ("employer_site_or_email", job.get("apply_url") or job.get("url"),
-                ["GOV.UK Work Hub links to the employer site or civil-service portal",
-                 "Sign in via gov.uk account (email/password or GOV.UK One Login, not Google)"])
+                ["GOV.UK Work Hub redirects to the employer's website — "
+                 "click 'Continue to the employer's website' on the 'Before "
+                 "you apply' page",
+                 "GOV.UK One Login (email + code, NOT Google SSO) required "
+                 "to reach the Apply button; the profile now has a session",
+                 "On the employer site: upload CV, fill form, submit"])
     return ("website_form", job.get("apply_url") or job.get("url"), [])
 
 

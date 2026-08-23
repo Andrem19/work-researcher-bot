@@ -448,8 +448,11 @@ class BrowserSession:
         return False
 
     SIGNED_OUT_MARKERS = ("sign in", "log in", "login", "register",
-                          "create account", "sign up")
-    SIGNED_IN_MARKERS = ("sign out", "log out", "my dashboard", "my account")
+                          "create account", "sign up",
+                          "create your gov.uk one login",
+                          "sign in or create")
+    SIGNED_IN_MARKERS = ("sign out", "log out", "my dashboard", "my account",
+                         "account home")
     SIGNIN_PATHS = ("/login", "/account/signin", "/en-GB/candidate/login",
                     "/users/sign_in", "/auth/login")
 
