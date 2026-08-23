@@ -35,10 +35,13 @@ from .ranking import score_job
 from .textutils import job_hash
 
 INSTRUCTIONS = (
-    "Work Researcher MCP: UK job search + application engine (27 compact tools). "
+    "Work Researcher MCP: UK job search + application engine (28 compact tools). "
     "USER WORKFLOW: (1) search_jobs(query or profile) — e.g. 'Data Analytics' or "
     "'Field Geologist Engineer'; (2) present the ranked list to the user — every "
-    "row MUST include the posted_by column (agency vs direct employer); (3) the "
+    "row MUST include the posted_by column (agency vs direct employer) AND a "
+    "short description (2-3 sentences: what the job involves, key duties); if "
+    "the description field is null, call fetch_job_description for the top "
+    "picks BEFORE presenting; (3) the "
     "user picks "
     "vacancies; (4) start_application(job_id) per pick — it refuses double "
     "applications (memory across sessions) and returns URL + method + CV + "
@@ -63,6 +66,11 @@ INSTRUCTIONS = (
     "automatically — training_offers_skipped counts them. When the user asks "
     "for 'junior/trainee with training', show only real paid vacancies "
     "(salary-present apprenticeships count); never propose paying for courses. "
+    "REQUIREMENTS CHECK: jobs with hard requirements the user does NOT meet "
+    "(from CVs) are flagged requirements_status=gap and dropped by default "
+    "(req_skipped counts them; drop_req_gap=false to see). Never propose a job "
+    "requiring e.g. AAT Level 2 if the user's CVs lack it — check "
+    "requirements_unmet before listing. "
     "BROWSER SPEED PROTOCOL: browser_open "
     "returns the first snapshot; every click/set/type/upload RETURNS a fresh "
     "snapshot — never re-snapshot between steps; use the element numbers from "
@@ -234,12 +242,20 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
             await db.ensure_seed_blocklist(conn, settings)
             blocked_companies, blocked_keywords = await db.load_blocked_norms(conn)
             from . import training as training_mod
+            from . import requirements as req_mod
+
+            # collect the best CV text for requirements matching
+            cur = await conn.execute(
+                "SELECT full_text FROM cvs ORDER BY length(full_text) DESC LIMIT 3")
+            cv_rows = await cur.fetchall()
+            cv_text = "\n".join((r["full_text"] or "") for r in cv_rows)
 
             best: dict[str, float] = {}
             job_ids: dict[str, str] = {}
             blocked_skipped = 0
             training_skipped = 0
             location_skipped = 0
+            req_skipped = 0
             for card in all_cards:
                 ch = job_hash(card.title, card.company, card.location_text, card.salary_min)
                 canonical = resolution.get(ch, ch)
@@ -270,6 +286,18 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                     job_ids.pop(canonical, None)
                     best.pop(canonical, None)
                     continue
+                # hard-requirements check against the CVs
+                if card.description and len(card.description) > 100:
+                    reqs = req_mod.extract_requirements(card.description)
+                    match = req_mod.match_requirements(reqs, cv_text)
+                    card.extra["requirements_status"] = match["status"]
+                    card.extra["requirements_unmet"] = [
+                        r["value"] for r in match["unmet"]]
+                    if match["status"] == "gap" and params.drop_req_gap:
+                        req_skipped += 1
+                        job_ids.pop(canonical, None)
+                        best.pop(canonical, None)
+                        continue
                 job_ids[canonical] = hashmap[ch][0]
                 score, _ = score_job(card, params.query, params.min_salary,
                                      params.work_from_home,
@@ -283,6 +311,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                 "blocked_skipped": blocked_skipped,
                 "training_skipped": training_skipped,
                 "location_skipped": location_skipped,
+                "req_skipped": req_skipped,
                 "home": home,
             })
             rows = sorted(((job_ids[c], s) for c, s in best.items()), key=lambda x: -x[1])
@@ -326,6 +355,11 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                     "give job_ids to the user; apply via start_application",
                     "when presenting the list ALWAYS show posted_by "
                     "(agency vs direct employer) for every job",
+                    "for each job show a SHORT DESCRIPTION (2-3 sentences "
+                    "from the description field; if null, call "
+                    "fetch_job_description for the top picks first)",
+                    "requirements_status=gap → the user does NOT meet a "
+                    "hard requirement — do not propose the job",
                     "location_status=mismatch → too far & not remote, do not apply "
                     "without user approval",
                 ],
@@ -364,6 +398,8 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         location_policy: str | None = None,
         include_training: bool = False,
         drop_mismatch: bool | None = None,
+        drop_req_gap: bool | None = None,
+        enrich_descriptions: int = 0,
     ) -> dict:
         """Run a UK job search OR page an earlier one. Fresh search: pass
         query ('Data Analyst'…) or profile ('data_analytics'/'field_geologist').
@@ -411,6 +447,10 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                                              and settings.exclude_training)
         if drop_mismatch is not None:
             params_kwargs["drop_mismatch"] = drop_mismatch
+        if drop_req_gap is not None:
+            params_kwargs["drop_req_gap"] = drop_req_gap
+        if enrich_descriptions:
+            params_kwargs["_enrich"] = enrich_descriptions
         params_kwargs.pop("radius", None)
         params = SearchParams(**{k: v for k, v in params_kwargs.items() if v is not None})
         if not params.query:
@@ -449,6 +489,8 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                     "posted_by": extra.get("posted_by"),
                     "posted_by_reason": extra.get("posted_by_reason"),
                     "training_offer": extra.get("training_offer", False),
+                    "requirements_status": extra.get("requirements_status"),
+                    "requirements_unmet": extra.get("requirements_unmet"),
                 })
                 if not include_description:
                     job["description"] = (job.get("description") or "")[:400] + "…"
@@ -481,6 +523,82 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                 return {"ok": removed, "removed": removed,
                         "blocklist": await db.blocklist_list(conn)}
             return {"blocklist": await db.blocklist_list(conn)}
+
+    @mcp.tool()
+    async def fetch_job_description(job_id: str) -> dict:
+        """Fetch the FULL job description by opening the page in the browser
+        and extracting the description text. Use for jobs where the HTML/API
+        parser returned null or a short teaser (common on Totaljobs/Reed).
+        Stores the description back into the job record and re-runs the
+        requirements check against your CVs."""
+        from . import requirements as req_mod
+        from .browser import BrowserError, get_session
+
+        async with db.connect(settings.db_path) as conn:
+            job = await db.get_job(conn, job_id)
+            if not job:
+                return {"error": f"unknown job_id {job_id}"}
+            url = job.get("apply_url") or job.get("url")
+            if not url:
+                return {"error": "job has no URL"}
+        try:
+            sess = get_session(settings)
+            opened = await sess.open(url)
+            if opened.get("error"):
+                return opened
+            await sess._active().wait_for_timeout(2500)
+            result = await sess.evaluate(
+                "() => (document.body.innerText || '').replace(/\\s+/g, ' ')")
+            full_text = (result.get("result") or "")
+            # find the description region: after the header/breadcrumbs,
+            # before the apply/footer
+            desc_start = full_text.find("Job description")
+            if desc_start == -1:
+                desc_start = full_text.find("About the role")
+            if desc_start == -1:
+                desc_start = 500  # skip header/nav
+            desc_end = full_text.rfind("Apply")
+            if desc_end == -1 or desc_end <= desc_start:
+                desc_end = len(full_text)
+            description = full_text[desc_start:desc_end].strip()[:8000]
+        except BrowserError as exc:
+            return {"error": str(exc)}
+
+        async with db.connect(settings.db_path) as conn:
+            await conn.execute(
+                "UPDATE jobs SET description=? WHERE id=?",
+                (description, job_id))
+            # re-run requirements check
+            cur = await conn.execute(
+                "SELECT full_text FROM cvs ORDER BY length(full_text) DESC LIMIT 3")
+            cv_rows = await cur.fetchall()
+            cv_text = "\n".join((r["full_text"] or "") for r in cv_rows)
+            reqs = req_mod.extract_requirements(description)
+            match = req_mod.match_requirements(reqs, cv_text)
+            await conn.execute(
+                "UPDATE jobs SET extra=COALESCE(extra,'{}') WHERE id=?",
+                (job_id,))
+            cur2 = await conn.execute("SELECT extra FROM jobs WHERE id=?", (job_id,))
+            row = await cur2.fetchone()
+            extra = {}
+            try:
+                extra = json.loads(row["extra"] or "{}")
+            except (TypeError, ValueError):
+                pass
+            extra["requirements_status"] = match["status"]
+            extra["requirements_unmet"] = [r["value"] for r in match["unmet"]]
+            await conn.execute("UPDATE jobs SET extra=? WHERE id=?",
+                               (json.dumps(extra, ensure_ascii=False), job_id))
+            await conn.commit()
+        return {
+            "job_id": job_id,
+            "description_length": len(description),
+            "description_preview": description[:500],
+            "requirements_status": match["status"],
+            "requirements_unmet": [r["value"] for r in match["unmet"]],
+            "requirements_hard": [r["value"] for r in reqs["hard"]],
+            "note": "description stored; requirements checked against your CVs",
+        }
 
     @mcp.tool()
     async def submit_job_observations(

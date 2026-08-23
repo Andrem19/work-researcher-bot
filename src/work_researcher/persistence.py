@@ -640,6 +640,10 @@ def brief_from_row(row: dict, rank: int, is_new: bool, sources: list[str]) -> di
         "posted_by": extra.get("posted_by"),
         "posted_by_reason": extra.get("posted_by_reason"),
         "training_offer": extra.get("training_offer", False) or False,
+        "requirements_status": extra.get("requirements_status"),
+        "requirements_unmet": extra.get("requirements_unmet"),
+        "description_excerpt": (extra.get("description") or "")[:200] or None
+        if extra.get("description") else None,
     }
 
 

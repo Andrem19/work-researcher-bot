@@ -52,6 +52,7 @@ class SearchParams(BaseModel):
     location_policy: str = "auto"  # auto | uk_wide | commute_only
     exclude_training: bool = True  # drop paid-course ads (training offers)
     drop_mismatch: bool = True  # drop on_site+mismatch from results (auto)
+    drop_req_gap: bool = True   # drop jobs with unmet hard requirements
 
 
 class JobBrief(BaseModel):
