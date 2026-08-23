@@ -27,7 +27,9 @@ from .config import Settings
 _TAGGER_JS = r"""
 () => {
   const sel = 'a[href], button, input, select, textarea, [role="button"], '
-            + '[role="link"], [role="tab"], [role="checkbox"], [contenteditable="true"], [onclick]';
+            + '[role="link"], [role="tab"], [role="checkbox"], [role="radio"], '
+            + '[role="dialog"], [role="listbox"], [role="option"], '
+            + '[contenteditable="true"], [onclick]';
   const els = Array.from(document.querySelectorAll(sel));
   const out = [];
   const visible = (el) => {
@@ -156,8 +158,30 @@ class BrowserSession:
                 self._context = await self._pw.chromium.launch_persistent_context(
                     channel=channel, **launch
                 )
-            except Exception:  # noqa: BLE001 - channel missing → bundled chromium
-                self._context = await self._pw.chromium.launch_persistent_context(**launch)
+            except Exception as exc:  # noqa: BLE001
+                msg = str(exc)
+                if "profile is already in use" in msg or "existing browser session" in msg:
+                    # stale browser process holds the profile singleton —
+                    # kill it and retry once
+                    self._kill_profile_processes()
+                    try:
+                        self._context = await self._pw.chromium.launch_persistent_context(
+                            channel=channel, **launch
+                        )
+                    except Exception:  # noqa: BLE001 - final fallback
+                        self._context = await self._pw.chromium.launch_persistent_context(
+                            **launch)
+                else:
+                    try:  # channel missing → bundled chromium
+                        self._context = await self._pw.chromium.launch_persistent_context(
+                            **launch)
+                    except Exception as exc2:  # noqa: BLE001
+                        if "profile is already in use" in str(exc2):
+                            self._kill_profile_processes()
+                            self._context = await (
+                                self._pw.chromium.launch_persistent_context(**launch))
+                        else:
+                            raise
             self._context.set_default_timeout(
                 int(self.settings.browser.get("default_timeout_ms", 15000))
             )
@@ -176,6 +200,27 @@ class BrowserSession:
                     except Exception:  # noqa: BLE001 - restored tabs may resist
                         pass
             return self._page
+
+    def _kill_profile_processes(self) -> None:
+        """Kill stale chrome/msedge processes holding the automation profile
+        (their singleton lock blocks launch_persistent_context)."""
+        import subprocess
+
+        profile = str(self.settings.browser_profile_dir)
+        try:
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance Win32_Process | Where-Object { "
+                 "$_.CommandLine -like '*browser_profile*' } | "
+                 "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+                capture_output=True, timeout=15)
+            _ = out  # best-effort
+        except Exception:  # noqa: BLE001 - never block the launch
+            pass
+        # wait briefly for the singleton lock to clear
+        import time as _t
+
+        _t.sleep(2)
 
     def _on_popup(self, page) -> None:
         """Adopt target=_blank popups opened by OUR clicks. Pages appearing

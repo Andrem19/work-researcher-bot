@@ -17,9 +17,15 @@ PLAYBOOKS: dict[str, str] = {
         "captchas/verification."
     ),
     "reed": (
-        "Reed: browser_open(job url) → 'Apply now' → upload CV file → short form "
-        "(right to work, notice) → 'Submit application'. 'Easy Apply' badge jobs "
-        "skip most questions."
+        "Reed: browser_open(job url) → 'Apply now' → an 'Application questions' "
+        "WIZARD opens (a modal): Q1 right to work + passport/residence permit/"
+        "birth certificate (answer from the applicant config), Q2 lived in "
+        "UK/EU/EEA 3+ years (yes), Q3 age-group dropdown (from config "
+        "age_group, e.g. '35-39'), Q4 date of birth (from config "
+        "date_of_birth 'YYYY-MM-DD' — day/month/year selects) — then CV "
+        "upload + short form (right to work, notice) → 'Submit application'. "
+        "Modal controls appear in browser_snapshot (dialogs/listboxes are "
+        "tagged). 'Easy Apply' badge jobs skip most questions."
     ),
     "totaljobs": (
         "Totaljobs (and Jobsite): job page → 'Apply now' → CV upload + cover "

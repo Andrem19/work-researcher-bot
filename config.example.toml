@@ -35,6 +35,13 @@ max_days_old = 14
 full_name = ""
 email = ""
 phone = ""
+# Wizard answers — boards (Reed/Totaljobs apply flows) ask for these:
+date_of_birth = ""                # "YYYY-MM-DD" — required by application wizards
+nationality = "British"
+right_to_work = "Yes, I have the right to work in the UK"
+right_to_work_docs = "UK birth certificate"   # or "UK passport", "settled status"
+uk_residence_years = "10+"        # "lived in UK/EU/EEA 3+ years" question
+age_group = ""                    # e.g. "35-39" (wizard dropdowns)
 # Location intelligence: remote jobs are searched UK-wide automatically;
 # on_site jobs must be within daily_commute_miles; hybrid/field/unknown
 # within occasional_commute_miles. Mismatch jobs are dropped from results

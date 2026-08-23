@@ -34,6 +34,12 @@ DEFAULTS: dict = {
         "full_name": "",
         "email": "",
         "phone": "",
+        "date_of_birth": "",           # "YYYY-MM-DD" — Reed/Totaljobs wizards ask
+        "nationality": "British",
+        "right_to_work": "Yes, I have the right to work in the UK",
+        "right_to_work_docs": "UK birth certificate",  # or "UK passport", "settled status"
+        "uk_residence_years": "10+",   # "lived in UK/EU/EEA 3+ years" wizard question
+        "age_group": "",               # e.g. "35-39" (wizard dropdowns)
         "location": "Blackpool, UK",
         "home_location": "Blackpool",
         "home_postcode": "",
@@ -42,7 +48,6 @@ DEFAULTS: dict = {
         "occasional_commute_miles": 50,
         "willing_to_relocate": False,
         "relocate_areas": [],
-        "right_to_work": "Yes, I have the right to work in the UK",
         "notice_period": "",
         "salary_expectation": "",
         "linkedin": "",

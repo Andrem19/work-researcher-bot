@@ -38,7 +38,7 @@ INSTRUCTIONS = (
     "Work Researcher MCP: UK job search + application engine (28 compact tools). "
     "ADAPTIVE SEARCH RESPONSES: on search_jobs and get_job pass context_window "
     "equal to your model's advertised context size. Local Qwen 3.8 27B MUST pass "
-    "context_window=80000 (or response_profile='compact'); models around 100k-256k "
+    "context_window=78000 (or response_profile='compact'); models around 100k-256k "
     "use balanced; models with 300k+ or 1M context use wide. The server selects a "
     "compact/balanced/wide page automatically, stores that policy with search_id, "
     "and returns next_page arguments. If model context is unknown, omit it for the "
@@ -90,7 +90,7 @@ INSTRUCTIONS = (
     "files DIRECTLY on input[type=file] (hidden inputs included — Totaljobs "
     "style) and falls back to the native chooser; cover letters: "
     "make_cover_letter(text) → DOCX >8KB (board minimum) → browser_upload. "
-    "IMPORTANT: the application form lives in THIS server's browser — never "
+    "CRITICAL: NEVER use the separate playwright MCP (mcp__playwright__*) for job pages or applications — its browser has NO logins and is a DIFFERENT context; always use this server's browser_* tools exclusively. IMPORTANT: the application form lives in THIS server's browser — never "
     "drive it with a separate Playwright/browser MCP (different context, not "
     "logged in). Only "
     "Indeed/LinkedIn/CV-Library/Glassdoor need the harness's own browser — feed "
@@ -237,7 +237,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
             "response_sizing": {
                 "model_context_not_visible_to_mcp": True,
                 "pass_to_search_jobs_and_get_job": "context_window",
-                "local_qwen_3_8_27b": 80000,
+                "local_qwen_3_8_27b": 78000,
                 "profiles": _SEARCH_RESPONSE_PROFILES,
                 "unknown_context_default": "balanced",
             },
@@ -553,7 +553,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         Paging: pass search_id (+offset from next_offset), preferably by copying
         the returned next_page object. Response sizing: pass context_window and
         auto selects compact (<=80k), balanced (80k-300k), or wide (>=300k).
-        Local Qwen 3.8 27B uses context_window=80000. You may instead pass
+        Local Qwen 3.8 27B uses context_window=78000. You may instead pass
         response_profile explicitly. Optional limit requests a page size within
         that profile's safety cap (8/20/50). With no sizing signal the default is
         balanced (12). All remaining results stay stored. Results are ranked,
@@ -725,10 +725,15 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         from . import requirements as req_mod
         from .browser import BrowserError, get_session
 
+        if not job_ids:
+            return {"error": "job_ids list is empty"}
+        job_ids = [j for j in job_ids if j][:10]
+        if not job_ids:
+            return {"error": "job_ids contained no valid ids"}
         results = []
         jobs = []
         async with db.connect(settings.db_path) as conn:
-            for jid in job_ids[:10]:
+            for jid in job_ids:
                 job = await db.get_job(conn, jid)
                 if not job:
                     results.append({"job_id": jid, "error": "unknown"})
@@ -744,8 +749,8 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                 results.append({"job_id": jid, "error": "no URL"})
                 continue
             try:
-                await sess.open(url)
-                await sess._active().wait_for_timeout(2500)
+                await asyncio.wait_for(sess.open(url), timeout=25)
+                await sess._active().wait_for_timeout(1500)
                 result = await sess.evaluate(
                     "() => (document.body.innerText || '').replace(/\\s+/g, ' ')")
                 full_text = (result.get("result") or "")
@@ -762,8 +767,9 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                              ("no longer accepting", "can no longer apply",
                               "vacancy has been closed", "position has been filled",
                               "closing date has passed"))
-            except BrowserError as exc:
-                results.append({"job_id": jid, "error": str(exc)})
+            except (BrowserError, asyncio.TimeoutError, Exception) as exc:
+                results.append({"job_id": jid,
+                                "error": f"{type(exc).__name__}: {str(exc)[:120]}"})
                 continue
 
             async with db.connect(settings.db_path) as conn:

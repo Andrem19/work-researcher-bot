@@ -64,7 +64,7 @@ browser (real Edge, persistent login profile).
 ## Intended agent workflow
 
 1. `search_jobs(profile="data_analytics", context_window=<your model context>)`
-   or a free-text query. Local Qwen uses `80000`; a 1M model uses `1000000`.
+   or a free-text query. Local Qwen uses `78000`; a 1M model uses `1000000`.
 2. Present the ranked list (duplicates merged, already_applied, location_status)
 3. User picks vacancies
 4. `start_application(job_id)` per pick → URL, method, CV, applicant profile,
