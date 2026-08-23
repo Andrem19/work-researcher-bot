@@ -27,6 +27,11 @@ browser (real Edge, persistent login profile).
 - **Blocklist**: "never apply to Penguin Recruitment" →
   `manage_blocklist(action=add, kind=company)` — persisted forever, blocked
   employers are hidden from results and refuses in start_application.
+- **Training-ad guard**: paid course ads (where the candidate pays —
+  Netcom-style providers, fee/loan language, trainee titles with bait salary
+  ranges like £30-65k) are excluded automatically with a
+  `training_offers_skipped` count; real paid apprenticeships stay.
+  `search_jobs(include_training=true)` opts in explicitly.
 - **CV management**: local `CV_collection` + Google Drive sync (folder "CV" on
   ry4ara@gmail.com). Read AND write: pull → edit docx locally →
   `push_cv_to_drive`. CVs are parsed, domain-tagged (data_analytics / geology

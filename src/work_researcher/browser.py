@@ -400,7 +400,8 @@ class BrowserSession:
 
     SIGNED_OUT_MARKERS = ("sign in", "log in", "login", "register",
                           "create account", "sign up")
-    SIGNIN_PATHS = ("/account/signin", "/en-GB/candidate/login", "/login",
+    SIGNED_IN_MARKERS = ("sign out", "log out", "my dashboard", "my account")
+    SIGNIN_PATHS = ("/login", "/account/signin", "/en-GB/candidate/login",
                     "/users/sign_in", "/auth/login")
 
     async def login_flow(self, url: str, google_account: str | None = None) -> dict:
@@ -474,6 +475,13 @@ class BrowserSession:
                     for e in current_snap.get("elements") or []):
                 return {"logged_in": True, "url": current_snap.get("url"),
                         "note": f"account chip '{google_account}' visible — signed in"}
+            _names = " ".join((e.get("name") or "").lower()
+                              for e in current_snap.get("elements") or [])
+            _page_text = (current_snap.get("text") or "").lower()
+            if any(m in _names or m in _page_text
+                   for m in self.SIGNED_IN_MARKERS):
+                return {"logged_in": True, "url": current_snap.get("url"),
+                        "note": "account controls visible (dashboard/sign out)"}
             if not _signed_out(current_snap) and not _login_form(current_snap):
                 return {"logged_in": True, "url": current_snap.get("url"),
                         "note": "no sign-in controls visible — already authenticated"}

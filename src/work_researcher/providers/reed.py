@@ -150,7 +150,8 @@ async def fetch(query: SearchQuery, cfg: dict) -> list[JobCard]:
         except ProviderError:
             pass  # fall through to HTML
     slug = slugify(query.query)
-    url = f"{BASE}/jobs/{slug}-jobs"
+    # hideTrainingJobs is Reed's own filter for paid-course ads
+    url = f"{BASE}/jobs/{slug}-jobs?hideTrainingJobs=true"
     async with html_client() as client:
         resp = await client.get(url)
         if resp.status_code != 200:

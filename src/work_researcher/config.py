@@ -28,6 +28,7 @@ DEFAULTS: dict = {
         "default_work_from_home": False,
         "default_limit_per_source": 25,
         "provider_timeout_s": 30,
+        "exclude_training_offers": True,
     },
     "applicant": {
         "full_name": "",
@@ -98,6 +99,7 @@ class Settings:
     default_work_from_home: bool = False
     default_limit_per_source: int = 25
     provider_timeout_s: int = 30
+    exclude_training: bool = True
 
     applicant: dict = field(default_factory=dict)
     drive: dict = field(default_factory=dict)
@@ -170,6 +172,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
         default_work_from_home=search["default_work_from_home"],
         default_limit_per_source=search["default_limit_per_source"],
         provider_timeout_s=search["provider_timeout_s"],
+        exclude_training=search.get("exclude_training_offers", True),
         applicant=merged["applicant"],
         drive=merged["drive"],
         browser=merged["browser"],

@@ -50,7 +50,13 @@ INSTRUCTIONS = (
     "are flagged mismatch — never submit those without explicit user approval. "
     "BLOCKLIST: when the user says 'never apply to X' → manage_blocklist "
     "action=add kind=company; blocked employers are hidden from results and "
-    "start_application refuses them. BROWSER SPEED PROTOCOL: browser_open "
+    "start_application refuses them. TRAINING-AD GUARD: paid course ads (where "
+    "the candidate pays: 'training course', Netcom-style providers, fee/loan "
+    "language, training company + trainee title + no salary) are EXCLUDED "
+    "automatically — training_offers_skipped counts them. When the user asks "
+    "for 'junior/trainee with training', show only real paid vacancies "
+    "(salary-present apprenticeships count); never propose paying for courses. "
+    "BROWSER SPEED PROTOCOL: browser_open "
     "returns the first snapshot; every click/set/type/upload RETURNS a fresh "
     "snapshot — never re-snapshot between steps; use the element numbers from "
     "the last result. On application forms call browser_form once, then "
@@ -197,9 +203,12 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
             hashmap = await db.upsert_jobs(conn, all_cards, resolution)
             await db.ensure_seed_blocklist(conn, settings)
             blocked_companies, blocked_keywords = await db.load_blocked_norms(conn)
+            from . import training as training_mod
+
             best: dict[str, float] = {}
             job_ids: dict[str, str] = {}
             blocked_skipped = 0
+            training_skipped = 0
             for card in all_cards:
                 ch = job_hash(card.title, card.company, card.location_text, card.salary_min)
                 canonical = resolution.get(ch, ch)
@@ -211,6 +220,15 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                     job_ids.pop(canonical, None)
                     best.pop(canonical, None)
                     continue
+                is_training, t_reason = training_mod.classify(card)
+                if is_training:
+                    card.extra["training_offer"] = True
+                    card.extra["training_reason"] = t_reason
+                    if params.exclude_training:
+                        training_skipped += 1
+                        job_ids.pop(canonical, None)
+                        best.pop(canonical, None)
+                        continue
                 job_ids[canonical] = hashmap[ch][0]
                 score, _ = score_job(card, params.query, params.min_salary,
                                      params.work_from_home,
@@ -222,6 +240,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                 "providers": {r.provider: r.model_dump() for r in reports},
                 "duplicates_merged": merged,
                 "blocked_skipped": blocked_skipped,
+                "training_skipped": training_skipped,
                 "home": home,
             })
             rows = sorted(((job_ids[c], s) for c, s in best.items()), key=lambda x: -x[1])
@@ -231,11 +250,13 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
             await conn.commit()
         return await _page_results(search_id, limit=15, offset=0,
                                    reports=reports, merged=merged,
-                                   blocked_skipped=blocked_skipped)
+                                   blocked_skipped=blocked_skipped,
+                                   training_skipped=training_skipped)
 
     async def _page_results(search_id: str, limit: int, offset: int = 0,
                             reports: list | None = None, merged: int | None = None,
-                            blocked_skipped: int | None = None) -> dict:
+                            blocked_skipped: int | None = None,
+                            training_skipped: int | None = None) -> dict:
         async with db.connect(settings.db_path) as conn:
             rows, total = await db.get_search_results(conn, search_id, limit, offset)
             if not rows and offset == 0:
@@ -269,6 +290,10 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                 out["duplicates_merged"] = merged
             if blocked_skipped:
                 out["blocked_skipped"] = blocked_skipped
+            if training_skipped:
+                out["training_offers_skipped"] = training_skipped
+                out["note_training"] = ("paid training/course ads were excluded "
+                                        "(pass include_training=true to see them)")
             return out
 
     @mcp.tool()
@@ -286,6 +311,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         sources: list[str] | None = None,
         limit_per_source: int | None = None,
         location_policy: str | None = None,
+        include_training: bool = False,
     ) -> dict:
         """Run a UK job search OR page an earlier one. Fresh search: pass
         query ('Data Analyst'…) or profile ('data_analytics'/'field_geologist').
@@ -293,8 +319,12 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         cross-board duplicates merged (sources[]), with memory flags
         (already_applied, application_status) and location intelligence
         (work_mode, distance_miles from Blackpool, location_status
-        ok|mismatch|caution|unknown). location_policy: 'auto' (default),
-        'uk_wide', 'commute_only'. work_from_home=true restricts to remote.
+        ok|mismatch|caution|unknown). PAID TRAINING/COURSE ADS (where you pay
+        them, e.g. Netcom-style 'trainee' course marketing) are excluded
+        automatically — training_offers_skipped shows how many; set
+        include_training=true only if the user explicitly wants courses.
+        location_policy: 'auto' (default), 'uk_wide', 'commute_only'.
+        work_from_home=true restricts to remote.
         """
         if search_id:
             return await _page_results(search_id, limit, offset)
@@ -325,6 +355,8 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                                              or settings.default_limit_per_source)
         if location_policy:
             params_kwargs["location_policy"] = location_policy
+        params_kwargs["exclude_training"] = (not include_training
+                                             and settings.exclude_training)
         params_kwargs.pop("radius", None)
         params = SearchParams(**{k: v for k, v in params_kwargs.items() if v is not None})
         if not params.query:

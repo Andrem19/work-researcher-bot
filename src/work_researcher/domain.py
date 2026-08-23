@@ -50,6 +50,7 @@ class SearchParams(BaseModel):
     limit_per_source: int = 25
     profile: str | None = None
     location_policy: str = "auto"  # auto | uk_wide | commute_only
+    exclude_training: bool = True  # drop paid-course ads (training offers)
 
 
 class JobBrief(BaseModel):

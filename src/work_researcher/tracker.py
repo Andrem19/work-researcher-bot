@@ -116,6 +116,11 @@ async def start_application(conn: aiosqlite.Connection, settings: Settings,
                 "error": f"{job.get('company')} is on the blocklist ({hit}) — "
                          "remove it via manage_blocklist if the user changed "
                          "their mind"}
+    if extra.get("training_offer"):
+        return {"ok": False, "training_offer": True,
+                "error": "this listing is a paid training/course ad "
+                         f"({extra.get('training_reason')}) — not a real job; "
+                         "do not apply"}
     loc_status = extra.get("location_status")
     if loc_status == "mismatch":
         cautions.append(
