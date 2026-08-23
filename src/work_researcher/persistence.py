@@ -229,7 +229,9 @@ async def upsert_jobs(conn: aiosqlite.Connection, cards: list[JobCard],
                     continue
                 # location intel refreshes in place (unknown → resolved later)
                 if k in ("work_mode", "distance_miles", "location_status",
-                         "location_reason") or old_extra.get(k) is None:
+                         "location_reason", "posted_by", "posted_by_reason",
+                         "training_offer", "training_reason") \
+                        or old_extra.get(k) is None:
                     merged_extra[k] = v
             await conn.execute(
                 """UPDATE jobs SET last_seen=?, url=COALESCE(?,url),
@@ -635,6 +637,9 @@ def brief_from_row(row: dict, rank: int, is_new: bool, sources: list[str]) -> di
         "distance_miles": extra.get("distance_miles"),
         "location_status": extra.get("location_status"),
         "location_reason": extra.get("location_reason"),
+        "posted_by": extra.get("posted_by"),
+        "posted_by_reason": extra.get("posted_by_reason"),
+        "training_offer": extra.get("training_offer", False) or False,
     }
 
 

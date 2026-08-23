@@ -37,7 +37,9 @@ from .textutils import job_hash
 INSTRUCTIONS = (
     "Work Researcher MCP: UK job search + application engine (26 compact tools). "
     "USER WORKFLOW: (1) search_jobs(query or profile) — e.g. 'Data Analytics' or "
-    "'Field Geologist Engineer'; (2) present the ranked list; (3) the user picks "
+    "'Field Geologist Engineer'; (2) present the ranked list to the user — every "
+    "row MUST include the posted_by column (agency vs direct employer); (3) the "
+    "user picks "
     "vacancies; (4) start_application(job_id) per pick — it refuses double "
     "applications (memory across sessions) and returns URL + method + CV + "
     "applicant profile + site playbook; (5) ensure login with browser_login(url) "
@@ -190,6 +192,8 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                         return {"work_mode": None, "distance_miles": None,
                                 "location_status": "unknown", "reason": "geo error"}
 
+            from . import seller as seller_mod
+
             evals = await asyncio.gather(*[_eval_guarded(c) for c in rep_cards.values()])
             for (canonical, card), ev in zip(rep_cards.items(), evals):
                 card.extra.update({
@@ -199,6 +203,12 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                     "location_reason": ev.get("reason"),
                 })
             ev_by_canonical = dict(zip(rep_cards.keys(), evals))
+            for canonical, card in rep_cards.items():
+                seller, s_reason = seller_mod.classify(
+                    card.company, card.description,
+                    card.extra.get("recruiter"))
+                card.extra["posted_by"] = seller
+                card.extra["posted_by_reason"] = s_reason
 
             hashmap = await db.upsert_jobs(conn, all_cards, resolution)
             await db.ensure_seed_blocklist(conn, settings)
@@ -280,6 +290,8 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                 "results": briefs,
                 "hints": [
                     "give job_ids to the user; apply via start_application",
+                    "when presenting the list ALWAYS show posted_by "
+                    "(agency vs direct employer) for every job",
                     "location_status=mismatch → too far & not remote, do not apply "
                     "without user approval",
                 ],
@@ -392,6 +404,9 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                     "distance_miles": extra.get("distance_miles"),
                     "location_status": extra.get("location_status"),
                     "location_reason": extra.get("location_reason"),
+                    "posted_by": extra.get("posted_by"),
+                    "posted_by_reason": extra.get("posted_by_reason"),
+                    "training_offer": extra.get("training_offer", False),
                 })
                 if not include_description:
                     job["description"] = (job.get("description") or "")[:400] + "…"
