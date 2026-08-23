@@ -31,6 +31,9 @@ _TAGGER_JS = r"""
   const els = Array.from(document.querySelectorAll(sel));
   const out = [];
   const visible = (el) => {
+    // file inputs are ALWAYS included even when display:none — boards hide
+    // them behind custom buttons and uploads must reach them directly
+    if (el.tagName === 'INPUT' && el.type === 'file') return true;
     const r = el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0 && el.tagName !== 'INPUT'
         && el.tagName !== 'SELECT' && el.tagName !== 'TEXTAREA') return false;
@@ -116,6 +119,7 @@ class BrowserSession:
         self._context = None
         self._page = None
         self._lock = asyncio.Lock()
+        self._last_click = 0.0  # popups are adopted only right after a click
 
     @property
     def running(self) -> bool:
@@ -158,13 +162,28 @@ class BrowserSession:
                 int(self.settings.browser.get("default_timeout_ms", 15000))
             )
             self._context.on("page", self._on_popup)
-            self._page = (self._context.pages[-1] if self._context.pages
-                          else await self._context.new_page())
+            # Edge restores tabs from the previous run in a persistent
+            # profile — keep one clean page and close the leftovers, so
+            # navigation never lands on a stale tab.
+            pages = [p for p in self._context.pages if not p.is_closed()]
+            blank = next(
+                (p for p in pages if p.url in ("about:blank", "")), None)
+            self._page = blank if blank is not None else await self._context.new_page()
+            for p in pages:
+                if p is not self._page:
+                    try:
+                        await p.close()
+                    except Exception:  # noqa: BLE001 - restored tabs may resist
+                        pass
             return self._page
 
     def _on_popup(self, page) -> None:
-        """Adopt target=_blank popups as the active page automatically."""
-        if not page.is_closed():
+        """Adopt target=_blank popups opened by OUR clicks. Pages appearing
+        outside a click window (Edge session-restore tabs at launch) must NOT
+        steal the active page — they stay reachable via browser_tabs."""
+        import time as _time
+
+        if _time.monotonic() - self._last_click < 6 and not page.is_closed():
             self._page = page
 
     def _active(self):
@@ -283,7 +302,10 @@ class BrowserSession:
         return page.locator(ref).first
 
     async def click(self, ref: int | str, timeout_ms: int | None = None) -> dict:
+        import time as _time
+
         el = await self._locate(ref)
+        self._last_click = _time.monotonic()
         await el.click(timeout=timeout_ms)
         await self._settle()
         return await self._snap()
@@ -315,14 +337,41 @@ class BrowserSession:
         return await self._snap()
 
     async def upload(self, ref: int | str, file_path: str) -> dict:
+        """Attach a local file. Works two ways, in order:
+        1. DIRECT set on input[type=file] via Playwright set_input_files —
+           works even when the input is HIDDEN (Totaljobs/StepStone style);
+           no native file chooser is involved.
+        2. Fallback: click the element and catch the native file chooser.
+        """
+        page = self._active()
         p = Path(file_path)
         if not p.exists():
             raise BrowserError(f"file not found: {file_path}")
         el = await self._locate(ref)
-        async with self._active().expect_file_chooser() as fc_info:
-            await el.click()
-        chooser = await fc_info.value
-        await chooser.set_files(str(p))
+        is_file_input = False
+        try:
+            is_file_input = await el.evaluate(
+                "e => e.tagName === 'INPUT' && (e.type === 'file')")
+        except Exception:  # noqa: BLE001 - element may not support evaluate
+            is_file_input = False
+        if is_file_input:
+            await el.set_input_files(str(p))
+            await self._settle()
+            return await self._snap()
+        # fallback: click → native chooser
+        try:
+            async with page.expect_file_chooser(timeout=8000) as fc_info:
+                await el.click()
+            chooser = await fc_info.value
+            await chooser.set_files(str(p))
+        except Exception:  # noqa: BLE001 - last resort: first file input on page
+            inputs = page.locator('input[type="file"]')
+            count = await inputs.count()
+            if count == 0:
+                raise BrowserError(
+                    "no file chooser and no input[type=file] on the page — "
+                    "open the upload dialog first, then retry") from None
+            await inputs.first.set_input_files(str(p))
         await self._settle()
         return await self._snap()
 
@@ -415,6 +464,18 @@ class BrowserSession:
         await self.open(url)
         await self._dismiss_consent()
 
+        async def _wait_for_content(snap: dict) -> dict:
+            """SPA pages render late; deciding 'logged in' on an empty page
+            is the classic false positive — wait for real content."""
+            for _ in range(6):
+                els = snap.get("elements") or []
+                text = snap.get("text") or ""
+                if len(els) >= 5 or len(text) >= 150:
+                    return snap
+                await self._active().wait_for_timeout(1000)
+                snap = await self._snap(text_chars=4000)
+            return snap
+
         def _signed_out(snap: dict) -> bool:
             text = (snap.get("text") or "").lower()
             els = snap.get("elements") or []
@@ -460,7 +521,8 @@ class BrowserSession:
                 for e in els)
             return has_pw and (has_email or len(els) < 15)
 
-        current_snap = await self._snap(text_chars=4000)
+        current_snap = await _wait_for_content(
+            await self._snap(text_chars=4000))
         for _round in range(8):
             if "accounts.google.com" in (current_snap.get("url") or ""):
                 res = await self._google_walk(google_account)
@@ -519,7 +581,7 @@ class BrowserSession:
                                 break
                             await self._active().wait_for_timeout(1200)
                             probe = await self._snap(text_chars=4000)
-                        current_snap = probe
+                        current_snap = await _wait_for_content(probe)
                         found_signin = True
                         break
                 if not found_signin:

@@ -23,7 +23,11 @@ PLAYBOOKS: dict[str, str] = {
     ),
     "totaljobs": (
         "Totaljobs (and Jobsite): job page → 'Apply now' → CV upload + cover "
-        "letter field + screening questions → 'Submit application'."
+        "letter field + screening questions → 'Submit application'. "
+        "SUPPORTING FILES must be LARGER than 8KB — generate cover letters "
+        "with make_cover_letter (DOCX, auto-padded). Uploads go through "
+        "browser_upload directly on the hidden input[type=file] element "
+        "(no native chooser needed)."
     ),
     "cv-library": (
         "CV-Library: job page → 'Apply for job' → account CV or upload → quick "
