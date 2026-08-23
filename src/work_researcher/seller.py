@@ -32,7 +32,13 @@ AGENCY_BRANDS = (
     "nigel wright", "neo recruitment", "holt recruitment",
     "robert walters", "michael page", "page personnel", "badenoch",
     "outsource uk", "outsource", "carrington west", "hudson shribman",
-    "calibre search", "zenith people",
+    "calibre search", "zenith people", "spectrum it",
+    "workshop recruitment", "recruit select",
+    # tech-recruitment agencies the user flagged as agencies
+    # (system missed them on the first real run)
+    "noir", "oscar", "zachary daniels", "nowskills", "back 2 work",
+    "ernest gordon", "bridgewater resources", "halecroft",
+    "njr", "apsley", "finlay jude",
 )
 
 AGENCY_DESCRIPTION_PHRASES = (

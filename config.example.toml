@@ -36,12 +36,14 @@ full_name = ""
 email = ""
 phone = ""
 # Location intelligence: remote jobs are searched UK-wide automatically;
-# hybrid/on-site/field jobs must be within max_commute_miles of home_location
-# (or listed in relocate_areas / willing_to_relocate=true), otherwise the job
-# is flagged location_status=mismatch and penalised.
+# on_site jobs must be within daily_commute_miles; hybrid/field/unknown
+# within occasional_commute_miles. Mismatch jobs are dropped from results
+# (drop_mismatch, configurable per search).
 home_location = "Blackpool"
 home_postcode = ""                 # optional, improves accuracy (e.g. "FY1 1AA")
-max_commute_miles = 50
+max_commute_miles = 40             # legacy fallback when work_mode unknown
+daily_commute_miles = 25          # on-site (daily office) commute limit
+occasional_commute_miles = 50      # hybrid/field (1-2 days/week) limit
 willing_to_relocate = false
 relocate_areas = []                # e.g. ["Manchester", "Leeds"]
 location = "Blackpool, UK"

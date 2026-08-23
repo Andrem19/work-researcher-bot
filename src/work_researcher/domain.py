@@ -51,6 +51,7 @@ class SearchParams(BaseModel):
     profile: str | None = None
     location_policy: str = "auto"  # auto | uk_wide | commute_only
     exclude_training: bool = True  # drop paid-course ads (training offers)
+    drop_mismatch: bool = True  # drop on_site+mismatch from results (auto)
 
 
 class JobBrief(BaseModel):

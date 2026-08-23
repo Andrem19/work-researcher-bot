@@ -38,6 +38,8 @@ DEFAULTS: dict = {
         "home_location": "Blackpool",
         "home_postcode": "",
         "max_commute_miles": 40,
+        "daily_commute_miles": 25,
+        "occasional_commute_miles": 50,
         "willing_to_relocate": False,
         "relocate_areas": [],
         "right_to_work": "Yes, I have the right to work in the UK",
@@ -100,6 +102,8 @@ class Settings:
     default_limit_per_source: int = 25
     provider_timeout_s: int = 30
     exclude_training: bool = True
+    daily_commute_miles: int = 25
+    occasional_commute_miles: int = 50
 
     applicant: dict = field(default_factory=dict)
     drive: dict = field(default_factory=dict)
@@ -173,6 +177,11 @@ def load_settings(config_path: Path | None = None) -> Settings:
         default_limit_per_source=search["default_limit_per_source"],
         provider_timeout_s=search["provider_timeout_s"],
         exclude_training=search.get("exclude_training_offers", True),
+        daily_commute_miles=int(search.get("daily_commute_miles",
+                                          merged["applicant"].get("daily_commute_miles", 25))),
+        occasional_commute_miles=int(search.get(
+            "occasional_commute_miles",
+            merged["applicant"].get("occasional_commute_miles", 50))),
         applicant=merged["applicant"],
         drive=merged["drive"],
         browser=merged["browser"],

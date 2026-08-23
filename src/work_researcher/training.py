@@ -34,6 +34,7 @@ PROVIDER_MARKERS = (
     "career switch", "it career switch", "justit", "just it training",
     "firebrand", "netcom", "training academy", "skills academy",
     "career institute", "career solutions", "it training",
+    "nowskills", "back 2 work",
 )
 
 TRAINING_COMPANY_WORDS = ("learning", "training", "academy", "education",

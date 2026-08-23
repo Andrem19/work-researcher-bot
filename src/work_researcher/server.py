@@ -48,8 +48,13 @@ INSTRUCTIONS = (
     "submission with browser_* tools; (7) record_application(status='submitted', "
     "evidence={screenshot}). LOCATION INTELLIGENCE: results carry work_mode / "
     "distance_miles / location_status (home=Blackpool per config). Remote jobs "
-    "are searched UK-wide; on-site/hybrid/field jobs outside max_commute_miles "
+    "are searched UK-wide; on-site jobs outside max_commute_miles "
     "are flagged mismatch — never submit those without explicit user approval. "
+    "LOCATION IS WORK-MODE-AWARE: on_site (daily office) must be within "
+    "daily_commute_miles (default 25); hybrid/field/unknown within "
+    "occasional_commute_miles (default 50); remote = any distance. By default "
+    "drop_mismatch=true removes on-site-mismatch jobs from the results "
+    "(location_skipped counts them) — pass drop_mismatch=false to see them. "
     "BLOCKLIST: when the user says 'never apply to X' → manage_blocklist "
     "action=add kind=company; blocked employers are hidden from results and "
     "start_application refuses them. TRAINING-AD GUARD: paid course ads (where "
@@ -165,6 +170,10 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                 home_lat=home and home["lat"], home_lon=home and home["lon"],
                 home_location=settings.applicant.get("home_location", "home"),
                 max_commute_miles=int(settings.applicant.get("max_commute_miles", 40)),
+                daily_commute_miles=int(settings.applicant.get(
+                    "daily_commute_miles", 25)),
+                occasional_commute_miles=int(settings.applicant.get(
+                    "occasional_commute_miles", 50)),
                 willing_to_relocate=bool(settings.applicant.get("willing_to_relocate")),
                 relocate_areas=list(settings.applicant.get("relocate_areas") or []),
                 location_policy=params.location_policy,
@@ -225,6 +234,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
             job_ids: dict[str, str] = {}
             blocked_skipped = 0
             training_skipped = 0
+            location_skipped = 0
             for card in all_cards:
                 ch = job_hash(card.title, card.company, card.location_text, card.salary_min)
                 canonical = resolution.get(ch, ch)
@@ -245,6 +255,16 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                         job_ids.pop(canonical, None)
                         best.pop(canonical, None)
                         continue
+                # work-mode-aware mismatch drop (the user's rule: a daily-on-site
+                # job beyond the commute is not worth showing)
+                ev = ev_by_canonical.get(canonical, {})
+                wm = ev.get("work_mode") or card.extra.get("work_mode")
+                ls = ev.get("location_status")
+                if params.drop_mismatch and ls == "mismatch" and wm != "remote":
+                    location_skipped += 1
+                    job_ids.pop(canonical, None)
+                    best.pop(canonical, None)
+                    continue
                 job_ids[canonical] = hashmap[ch][0]
                 score, _ = score_job(card, params.query, params.min_salary,
                                      params.work_from_home,
@@ -257,6 +277,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                 "duplicates_merged": merged,
                 "blocked_skipped": blocked_skipped,
                 "training_skipped": training_skipped,
+                "location_skipped": location_skipped,
                 "home": home,
             })
             rows = sorted(((job_ids[c], s) for c, s in best.items()), key=lambda x: -x[1])
@@ -267,12 +288,14 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         return await _page_results(search_id, limit=15, offset=0,
                                    reports=reports, merged=merged,
                                    blocked_skipped=blocked_skipped,
-                                   training_skipped=training_skipped)
+                                   training_skipped=training_skipped,
+                                   location_skipped=location_skipped)
 
     async def _page_results(search_id: str, limit: int, offset: int = 0,
                             reports: list | None = None, merged: int | None = None,
                             blocked_skipped: int | None = None,
-                            training_skipped: int | None = None) -> dict:
+                            training_skipped: int | None = None,
+                            location_skipped: int | None = None) -> dict:
         async with db.connect(settings.db_path) as conn:
             rows, total = await db.get_search_results(conn, search_id, limit, offset)
             if not rows and offset == 0:
@@ -312,6 +335,11 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                 out["training_offers_skipped"] = training_skipped
                 out["note_training"] = ("paid training/course ads were excluded "
                                         "(pass include_training=true to see them)")
+            if location_skipped:
+                out["location_skipped"] = location_skipped
+                out["note_location"] = ("on-site jobs beyond the commute limit "
+                                        "were dropped (work-mode-aware: daily ≤25mi, "
+                                        "hybrid/field ≤50mi, remote unlimited)")
             return out
 
     @mcp.tool()
@@ -330,6 +358,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         limit_per_source: int | None = None,
         location_policy: str | None = None,
         include_training: bool = False,
+        drop_mismatch: bool | None = None,
     ) -> dict:
         """Run a UK job search OR page an earlier one. Fresh search: pass
         query ('Data Analyst'…) or profile ('data_analytics'/'field_geologist').
@@ -375,6 +404,8 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
             params_kwargs["location_policy"] = location_policy
         params_kwargs["exclude_training"] = (not include_training
                                              and settings.exclude_training)
+        if drop_mismatch is not None:
+            params_kwargs["drop_mismatch"] = drop_mismatch
         params_kwargs.pop("radius", None)
         params = SearchParams(**{k: v for k, v in params_kwargs.items() if v is not None})
         if not params.query:

@@ -182,15 +182,19 @@ def evaluate_location(
     willing_to_relocate: bool,
     relocate_areas: list[str] | None = None,
     location_policy: str = "auto",
+    daily_commute_miles: int = 25,
+    occasional_commute_miles: int = 50,
 ) -> dict:
     """Return {work_mode, distance_miles, location_status, reason}.
 
-    status: ok | mismatch | unknown. location_policy: 'auto' (apply commute
-    rules), 'uk_wide' (ignore distance), 'commute_only' (drop remote-unknown
-    far jobs harder).
+    The commute limit is work-mode-aware (the user's rule from the real run):
+    - remote: distance irrelevant, searched UK-wide
+    - on_site (daily office): must be within daily_commute_miles (default 25)
+    - hybrid / field / unknown: within occasional_commute_miles (default 50)
+    - 'uk_wide' policy ignores distance; 'commute_only' drops far non-remote jobs
     """
     relocate_areas = relocate_areas or []
-    if work_mode in ("remote",) :
+    if work_mode in ("remote",):
         return {"work_mode": work_mode, "distance_miles": None, "location_status": "ok",
                 "reason": "remote — location irrelevant, searched UK-wide"}
     if location_policy == "uk_wide":
@@ -199,6 +203,14 @@ def evaluate_location(
             dist = round(_haversine(home_lat, home_lon, job_lat, job_lon))
         return {"work_mode": work_mode, "distance_miles": dist,
                 "location_status": "ok", "reason": "uk_wide policy — distance ignored"}
+
+    # pick the commute threshold by work mode
+    if work_mode == "on_site":
+        limit = daily_commute_miles
+        limit_label = f"daily commute {daily_commute_miles}"
+    else:  # hybrid, field, unknown → occasional (1-2 days/week or travel)
+        limit = occasional_commute_miles
+        limit_label = f"occasional commute {occasional_commute_miles}"
 
     dist = None
     if job_lat is not None and home_lat is not None:
@@ -211,10 +223,10 @@ def evaluate_location(
                 "location_status": "unknown",
                 "reason": "could not geocode job location — ask the user if unsure"}
 
-    near = dist <= max_commute_miles
+    near = dist <= limit
     if near:
         return {"work_mode": work_mode, "distance_miles": dist, "location_status": "ok",
-                "reason": f"{dist} mi from {home_location} (within {max_commute_miles})"}
+                "reason": f"{dist} mi from {home_location} (within {limit_label})"}
     if relocate_areas:
         low = (job_location or "").lower()
         if any(a.lower() in low for a in relocate_areas):
@@ -225,11 +237,11 @@ def evaluate_location(
         return {"work_mode": work_mode, "distance_miles": dist,
                 "location_status": "caution",
                 "reason": f"{dist} mi from {home_location} — relocation required "
-                          "(user is willing, confirm before applying)"}
+                          f"(beyond {limit_label}; user is willing, confirm)"}
     return {"work_mode": work_mode, "distance_miles": dist,
             "location_status": "mismatch",
-            "reason": f"{dist} mi from {home_location} exceeds {max_commute_miles} mi "
-                      f"commute limit and job is not remote"}
+            "reason": f"{dist} mi from {home_location} exceeds {limit_label} "
+                      f"and job is not remote"}
 
 
 async def home_geo(settings: Settings, conn=None) -> dict | None:
