@@ -90,7 +90,7 @@ INSTRUCTIONS = (
     "files DIRECTLY on input[type=file] (hidden inputs included — Totaljobs "
     "style) and falls back to the native chooser; cover letters: "
     "make_cover_letter(text) → DOCX >8KB (board minimum) → browser_upload. "
-    "CRITICAL: NEVER use the separate playwright MCP (mcp__playwright__*) for job pages or applications — its browser has NO logins and is a DIFFERENT context; always use this server's browser_* tools exclusively. IMPORTANT: the application form lives in THIS server's browser — never "
+    "WIZARD PROTOCOL (Reed apply questions and any modal-based form): use browser_snapshot(modal_only=true) — it isolates the ACTIVE wizard (question text + numbered controls, hidden templates like 'Session expired' excluded) — then browser_set/browser_click by number. NEVER hand-roll modal-finding JS via browser_eval (slow, fragile, and hidden templates mislead it). NEVER close a wizard modal: its X loses ALL progress and it restarts from Q1. NEVER click unnamed/empty buttons. Required multi-selects without a visible none-option: SCROLL the list first ('prefer not to say' / 'none of these' usually sits below the fold). CRITICAL: NEVER use the separate playwright MCP (mcp__playwright__*) for job pages or applications — its browser has NO logins and is a DIFFERENT context; always use this server's browser_* tools exclusively. IMPORTANT: the application form lives in THIS server's browser — never "
     "drive it with a separate Playwright/browser MCP (different context, not "
     "logged in). Only "
     "Indeed/LinkedIn/CV-Library/Glassdoor need the harness's own browser — feed "
@@ -1072,12 +1072,16 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool()
     async def browser_snapshot(focus: str | None = None,
                                filter_text: str | None = None,
-                               text_chars: int = 800) -> dict:
+                               text_chars: int = 800,
+                               modal_only: bool = False) -> dict:
         """Look at the page: numbered interactive elements + text. focus:
         'inputs'|'buttons'|'links'; filter_text narrows by name (find 'Apply');
-        text_chars=0 → elements only, 6000 → reading mode."""
+        text_chars=0 → elements only, 6000 → reading mode. modal_only=true →
+        ONLY the active dialog/wizard (question text + controls, hidden
+        templates excluded) — use for apply wizards, then browser_set/click
+        by number."""
         try:
-            return await get_session(settings).snapshot(focus, filter_text, text_chars)
+            return await get_session(settings).snapshot(focus, filter_text, text_chars, modal_only)
         except Exception as exc:  # noqa: BLE001 - browser errors must not kill the tool call
             return {"error": str(exc)}
 

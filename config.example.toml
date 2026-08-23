@@ -42,6 +42,13 @@ right_to_work = "Yes, I have the right to work in the UK"
 right_to_work_docs = "UK birth certificate"   # or "UK passport", "settled status"
 uk_residence_years = "10+"        # "lived in UK/EU/EEA 3+ years" question
 age_group = ""                    # e.g. "35-39" (wizard dropdowns)
+gender = "Male"                   # Reed wizard Q5
+ethnicity = "White"               # Reed wizard Q6 (UK census groups)
+still_in_education = false        # Reed wizard Q7
+earliest_start_date = ""          # blank = ~2 Mondays ahead
+highest_qualification = "Level 6 (BSc degree, NARIC confirmed)"
+past_apprenticeship = false
+owns_car = true
 # Location intelligence: remote jobs are searched UK-wide automatically;
 # on_site jobs must be within daily_commute_miles; hybrid/field/unknown
 # within occasional_commute_miles. Mismatch jobs are dropped from results

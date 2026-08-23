@@ -110,6 +110,56 @@ _FORM_JS = r"""
 """
 
 
+_MODAL_TAGGER_JS = r"""
+() => {
+  const dialogs = Array.from(document.querySelectorAll(
+    '[role="dialog"], [role="alertdialog"], .modal.show, [aria-modal="true"]'));
+  // keep only the truly visible dialog (hidden templates like
+  // 'Session expired' sit in the DOM with display:none)
+  const visibleDialog = dialogs.find(d => {
+    const s = getComputedStyle(d);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = d.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  });
+  if (!visibleDialog) {
+    return {url: location.href, title: document.title, elements: []};
+  }
+  const sel = 'button, input, select, textarea, [role="button"], '
+            + '[role="radio"], [role="checkbox"], [role="listbox"], '
+            + '[role="option"], a[href], [contenteditable="true"]';
+  const els = Array.from(visibleDialog.querySelectorAll(sel));
+  const out = [];
+  els.forEach((el) => {
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0
+        && el.tagName !== 'INPUT' && el.tagName !== 'SELECT') return;
+    const n = out.length;
+    el.setAttribute('data-wr-n', String(n));
+    const label = (el.getAttribute('aria-label') || el.getAttribute('placeholder')
+      || el.innerText || el.value || el.title || '').trim()
+      .replace(/\s+/g, ' ').slice(0, 90);
+    out.push({
+      n, tag: el.tagName.toLowerCase(),
+      type: el.getAttribute('type') || (el.tagName === 'SELECT' ? 'select' : null),
+      name: label || null,
+      value: (el.value || '').slice(0, 50) || null,
+      options: el.tagName === 'SELECT'
+        ? Array.from(el.options).slice(0, 25)
+          .map(o => ({v: o.value, t: o.text.trim().slice(0, 60)}))
+        : undefined,
+    });
+  });
+  const q = (visibleDialog.innerText || '')
+    .replace(/\s+/g, ' ').trim().slice(0, 600);
+  return {url: location.href, title: document.title,
+          modal_question: q, elements: out};
+}
+"""
+
+
 class BrowserError(RuntimeError):
     pass
 
@@ -295,11 +345,33 @@ class BrowserSession:
         return out
 
     async def snapshot(self, focus: str | None = None, filter_text: str | None = None,
-                       text_chars: int = 800) -> dict:
-        """Elements + page text in one view. text_chars=0 → elements only;
-        large text_chars (e.g. 6000) → reading mode."""
+                       text_chars: int = 800, modal_only: bool = False) -> dict:
+        """Surgical page view. modal_only=true: show ONLY the active modal's
+        controls (wizards/live-chat dialogs) — hidden templates excluded,
+        page-behind elements suppressed; element numbers are stable for the
+        next browser_set/click. text_chars=0 → elements only."""
+        if modal_only:
+            return await self._snap_modal(filter_text)
         return await self._snap(text_chars=text_chars, focus=focus,
                                 filter_text=filter_text)
+
+    async def _snap_modal(self, filter_text: str | None = None) -> dict:
+        """Elements of the VISIBLE [role=dialog] only (Reed apply wizard,
+        confirmation dialogs). Hidden templates (display:none 'Session
+        expired' etc.) are filtered out by visibility checks."""
+        page = self._active()
+        data = await page.evaluate(_MODAL_TAGGER_JS)
+        elements = data["elements"]
+        if filter_text:
+            low = filter_text.lower()
+            elements = [e for e in elements
+                        if low in (e.get("name") or "").lower()
+                        or low in (e.get("value") or "").lower()]
+        data["elements"] = elements[:60]
+        if not elements:
+            data["note"] = ("no visible modal — if a wizard was expected, "
+                            "click Apply / reopen it first")
+        return data
 
     async def set(self, ref: int | str, value: str | list[str] | bool) -> dict:
         """One mental model: set element #n to a value, whatever it is.
