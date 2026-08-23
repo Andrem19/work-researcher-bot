@@ -152,8 +152,27 @@ async def index_cvs(settings: Settings, force: bool = False) -> dict:
     }
 
 
+JOB_DOMAIN_HINTS = {
+    "geology": ("geolog", "geoscience", "geotech", "geophysic", "hydrogeolog",
+                "borehole", "drilling", "mud log", "site investigation",
+                "contaminated land", "mineral", "mining", "quarry", "fieldwork",
+                "geophysical logging", "geo-environmental", "ground investigation"),
+    "data_analytics": ("data analyst", "analytics", "sql", "tableau", "power bi",
+                       "dashboard", "insight", "reporting analyst",
+                       "business intelligence", "data scientist"),
+}
+
+
+def job_domains(job_text: str) -> set[str]:
+    low = (job_text or "").lower()
+    return {d for d, words in JOB_DOMAIN_HINTS.items()
+            if any(w in low for w in words)}
+
+
 async def recommend_cv(conn: aiosqlite.Connection, job: dict, limit: int = 3) -> list[dict]:
-    """Rank CVs against a job by domain-tag and keyword overlap."""
+    """Rank CVs for a job: domain-tag match FIRST (a geology role must not
+    surface the Data Analyst CV just because it mentions more keywords),
+    then keyword coverage."""
     from .textutils import query_terms, term_coverage
 
     cur = await conn.execute("SELECT id, filename, tags, full_text, indexed_at FROM cvs")
@@ -161,24 +180,31 @@ async def recommend_cv(conn: aiosqlite.Connection, job: dict, limit: int = 3) ->
     job_text = " ".join(
         str(job.get(k) or "") for k in ("title", "description", "company", "location_text")
     )
+    domains = job_domains(job_text)
     scored = []
     for r in rows:
         tags = re.findall(r"[a-z_]+", r["tags"] or "")
         tag_bonus = 0.0
-        low = job_text.lower()
-        if "data_analytics" in tags and any(
-            w in low for w in ("data", "analyst", "analytics", "bi", "insight")
-        ):
-            tag_bonus += 0.3
-        if "geology" in tags and any(
-            w in low for w in ("geolog", "geotech", "geo", "site investigation", "drilling")
-        ):
-            tag_bonus += 0.3
+        for domain in domains:
+            if domain in tags:
+                tag_bonus += 0.35          # CV built for this domain
+            elif tags and domain in JOB_DOMAIN_HINTS:
+                tag_bonus -= 0.15          # CV from a different domain
         cov = term_coverage(query_terms(job_text)[:15], r["full_text"] or "")
         score = round(min(1.0, cov + tag_bonus), 2)
         scored.append({
             "cv_id": r["id"], "filename": r["filename"], "tags": tags,
             "score": score, "indexed_at": r["indexed_at"],
+            "domain_match": sorted(domains & set(tags)),
         })
     scored.sort(key=lambda x: -x["score"])
+    # tie-break: a CV FILENAME named after the job domain (e.g.
+    # Engineering_Geology.docx for a geology role) outranks generic files
+    domain_words = [w.replace("_", " ") for d in domains
+                    for w in (d, d + " cv")]
+    if domain_words:
+        def _named(rec: dict) -> int:
+            fn = rec["filename"].lower().replace("-", " ")
+            return 0 if any(w in fn for w in domain_words) else 1
+        scored.sort(key=lambda x: (-x["score"], _named(x)))
     return scored[:limit]
