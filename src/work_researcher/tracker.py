@@ -42,6 +42,12 @@ PLAYBOOKS: dict[str, str] = {
         "Earthworks jobpost pages link to the employer/agency instructions — "
         "usually an email address or external portal; follow the page text."
     ),
+    "findajob": (
+        "GOV.UK Work Hub (jobs.service.gov.uk): job page → scroll for the "
+        "description. Apply: the button links to the employer's external site "
+        "or the civil-service application portal. Sign in via gov.uk account "
+        "(email/password or GOV.UK One Login — NOT Google SSO)."
+    ),
     "website_form": (
         "Employer career sites (Workday/SmartRecruiters/Greenhouse/iCIMS): "
         "browser_open(url) → browser_form() → browser_set per field → upload CV → "
@@ -69,6 +75,10 @@ def _apply_method(job: dict) -> tuple[str, str | None, list[str]]:
     if source == "earthworks":
         return ("employer_site_or_email", job.get("apply_url") or job.get("url"),
                 ["Earthworks posts link to the employer/agency instructions — read the page"])
+    if source == "findajob":
+        return ("employer_site_or_email", job.get("apply_url") or job.get("url"),
+                ["GOV.UK Work Hub links to the employer site or civil-service portal",
+                 "Sign in via gov.uk account (email/password or GOV.UK One Login, not Google)"])
     return ("website_form", job.get("apply_url") or job.get("url"), [])
 
 

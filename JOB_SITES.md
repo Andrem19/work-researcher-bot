@@ -20,7 +20,7 @@ Support tiers used by Work Researcher MCP:
 | [LinkedIn Jobs](https://www.linkedin.com/jobs) | browser | ToS restrict automation — surface to user, slow pace |
 | [Glassdoor](https://www.glassdoor.co.uk) | browser | same as CV-Library |
 | [Jobserve](https://www.jobserve.com) | browser | results page is a JS shell over a session search |
-| [FindAJob (DWP)](https://findajob.dwp.gov.uk) | — | returns 503 (service wound down); provider kept disabled |
+| [FindAJob / GOV.UK Work Hub](https://www.jobs.service.gov.uk/jobs) | browser | GOV.UK's job search (replaces the old findajob.dwp.gov.uk). JS SPA — 618+ results for "data analyst". Filters: REMOTE/ONSITE/HYBRID/FIELD_BASED (maps to our work_mode). Sign in via gov.uk account (email/password or GOV.UK One Login, NOT Google SSO). |
 | [Monster UK](https://www.monster.co.uk) | — | UK operations closed (2024) |
 | [Otta / Welcome to the Jungle](https://uk.welcometothejungle.com) | future | tech/graduate roles |
 | [CWJobs / TechnoJobs](https://www.cwjobs.co.uk) | future | IT boards, HTML like Totaljobs |

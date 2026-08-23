@@ -81,7 +81,7 @@ DEFAULTS: dict = {
         "adzuna": {"enabled": True, "app_id": "", "app_key": ""},
         "jooble": {"enabled": True, "api_key": ""},
         "earthworks": {"enabled": True, "uk_only": True},
-        "findajob": {"enabled": False},
+        "findajob": {"enabled": True, "browser_only": True},
     },
 }
 

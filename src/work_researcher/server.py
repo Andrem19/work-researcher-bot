@@ -76,7 +76,12 @@ INSTRUCTIONS = (
     "drive it with a separate Playwright/browser MCP (different context, not "
     "logged in). Only "
     "Indeed/LinkedIn/CV-Library/Glassdoor need the harness's own browser — feed "
-    "findings back via submit_job_observations. Dedup merges the same vacancy "
+    "findings back via submit_job_observations. GOV.UK Work Hub "
+    "(jobs.service.gov.uk/jobs) is also browser-only: browser_open "
+    "→ fill keywords input (id=keywordsInput) → Search → run the "
+    "SCRAPE_LINKS_JS from providers/govuk_workhub.py via browser_eval → "
+    "submit_job_observations. Its REMOTE/ONSITE/HYBRID/FIELD_BASED filters "
+    "map directly to work_mode. Dedup merges the same vacancy "
     "across boards — check sources[] and already_applied before applying."
 )
 

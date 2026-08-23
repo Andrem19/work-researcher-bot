@@ -17,7 +17,7 @@ REGISTRY: dict[str, str] = {
     "adzuna": "work_researcher.providers.adzuna",
     "jooble": "work_researcher.providers.jooble",
     "earthworks": "work_researcher.providers.earthworks",
-    "findajob": "work_researcher.providers.findajob",
+    "findajob": "work_researcher.providers.govuk_workhub",
 }
 
 BROWSER_ONLY_NOTES = {
@@ -27,6 +27,12 @@ BROWSER_ONLY_NOTES = {
     "linkedin": "LinkedIn aggressively blocks automation and its ToS forbid it. "
                 "Manual or careful browser use only.",
     "glassdoor": "Glassdoor blocks non-browser clients. Browser only.",
+    "findajob": "GOV.UK Work Hub (jobs.service.gov.uk/jobs) renders results as "
+                "a JS SPA — HTTP returns a shell. Search with browser_open → "
+                "fill keywords input → Search → run the SCRAPE_LINKS_JS from "
+                "providers/govuk_workhub.py via browser_eval → "
+                "submit_job_observations. Filters: REMOTE/ONSITE/HYBRID/"
+                "FIELD_BASED checkboxes map directly to work_mode.",
 }
 
 

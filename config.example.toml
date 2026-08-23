@@ -103,4 +103,5 @@ enabled = true
 uk_only = true
 
 [providers.findajob]
-enabled = false                    # DWP FindAJob currently returns 503
+enabled = true                  # GOV.UK Work Hub (jobs.service.gov.uk/jobs)
+browser_only = true             # JS SPA — searched via browser, not HTTP
