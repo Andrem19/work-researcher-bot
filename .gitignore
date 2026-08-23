@@ -11,6 +11,7 @@ data/
 logs/
 *.part
 *.log
+.playwright-mcp/
 
 # CVs are personal data synced from Google Drive — not for the repo
 CV_collection/
