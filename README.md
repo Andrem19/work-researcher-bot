@@ -40,6 +40,12 @@ browser (real Edge, persistent login profile).
   picks the pre-approved account (7255591@gmail.com) without asking; every
   action returns a fresh compact snapshot (no re-snapshot round-trips);
   `browser_form` shows application forms with human labels; popups auto-adopt.
+- **Adaptive MCP responses**: `search_jobs` and `get_job` accept the calling
+  model's `context_window` (or `response_profile=compact|balanced|wide`). A
+  55k local model receives small resumable batches while a 300k/1M model can
+  receive much larger pages. Pagination stores its policy with `search_id`, so
+  following `next_page` does not silently change batch size. The full result
+  set always remains in SQLite.
 
 ## Tools (26, prefix-grouped)
 
@@ -57,7 +63,8 @@ browser (real Edge, persistent login profile).
 
 ## Intended agent workflow
 
-1. `search_jobs(profile="data_analytics")` or a free-text query
+1. `search_jobs(profile="data_analytics", context_window=<your model context>)`
+   or a free-text query. Local Qwen uses `80000`; a 1M model uses `1000000`.
 2. Present the ranked list (duplicates merged, already_applied, location_status)
 3. User picks vacancies
 4. `start_application(job_id)` per pick → URL, method, CV, applicant profile,
@@ -65,6 +72,24 @@ browser (real Edge, persistent login profile).
 5. `browser_login(url)` if the board needs auth (Google account is pre-approved)
 6. `browser_form` + `browser_set`… + `browser_screenshot` at the confirmation
 7. `record_application(status="submitted", evidence={screenshot})`
+
+## Adaptive response sizing
+
+MCP stdio does not transmit the caller's model name or context window. The
+portable solution is therefore an optional tool argument, not a hard-coded
+assumption about ZCode, OpenCode or DeepSeek Harness:
+
+| Effective profile | Selection with `response_profile=auto` | Search default / cap | Full `get_job` cap |
+|---|---:|---:|---:|
+| `compact` | context ≤80k (Qwen: 55,040) | 4 / 8 | 2 jobs |
+| `balanced` | 80k–299,999 or unknown | 12 / 20 | 5 jobs |
+| `wide` | context ≥300k (including 1M) | 30 / 50 | 12 jobs |
+
+An explicit `limit` changes the requested page size but remains bounded by the
+selected profile. When neither context nor profile is supplied, `balanced` is
+used. Every paged response includes `response_policy` and a ready-to-copy
+`next_page` object. Calling an existing `search_id` without sizing arguments
+inherits the policy saved by the original search.
 
 ## Quick start
 

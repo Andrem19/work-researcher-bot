@@ -21,7 +21,7 @@ import asyncio
 import json
 import logging
 import sys
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server import MCPServer
 
@@ -36,6 +36,16 @@ from .textutils import job_hash
 
 INSTRUCTIONS = (
     "Work Researcher MCP: UK job search + application engine (28 compact tools). "
+    "ADAPTIVE SEARCH RESPONSES: on search_jobs and get_job pass context_window "
+    "equal to your model's advertised context size. Local Qwen 3.8 27B MUST pass "
+    "context_window=80000 (or response_profile='compact'); models around 100k-256k "
+    "use balanced; models with 300k+ or 1M context use wide. The server selects a "
+    "compact/balanced/wide page automatically, stores that policy with search_id, "
+    "and returns next_page arguments. If model context is unknown, omit it for the "
+    "safe balanced default. Do not launch more than 2 fresh searches in one tool "
+    "round or fetch every page without first ranking the current page. get_job is "
+    "compact by default; request full descriptions only for finalists. No search "
+    "data is discarded by response pagination. "
     "USER WORKFLOW: (1) search_jobs(query or profile) — e.g. 'Data Analytics' or "
     "'Field Geologist Engineer'; (2) present the ranked list to the user — every "
     "row MUST include the posted_by column (agency vs direct employer) AND a "
@@ -66,7 +76,7 @@ INSTRUCTIONS = (
     "automatically — training_offers_skipped counts them. When the user asks "
     "for 'junior/trainee with training', show only real paid vacancies "
     "(salary-present apprenticeships count); never propose paying for courses. "
-    "REQUIREMENTS CHECK: jobs with hard requirements the user does NOT meet "
+    "TOKEN DISCIPLINE: never re-run the same search_jobs query twice — the tool returns note_duplicate with the existing search_id; PAGE it via search_id+offset instead. Never query the SQLite DB via Bash — use list_stored_jobs (filter stored jobs by company/title/location/source). Batch fetch_job_description(job_ids=[...]) up to 10 at once instead of one-by-one calls. REQUIREMENTS CHECK: jobs with hard requirements the user does NOT meet "
     "(from CVs) are flagged requirements_status=gap and dropped by default "
     "(req_skipped counts them; drop_req_gap=false to see). Never propose a job "
     "requiring e.g. AAT Level 2 if the user's CVs lack it — check "
@@ -94,6 +104,69 @@ INSTRUCTIONS = (
 )
 
 logger = logging.getLogger("work_researcher")
+
+
+ResponseProfile = Literal["auto", "compact", "balanced", "wide"]
+
+_SEARCH_RESPONSE_PROFILES = {
+    "compact": {"default_limit": 4, "max_limit": 8},
+    "balanced": {"default_limit": 12, "max_limit": 20},
+    "wide": {"default_limit": 30, "max_limit": 50},
+}
+
+
+def _resolve_response_policy(
+    response_profile: ResponseProfile = "auto",
+    context_window: int | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Resolve a bounded response page without pretending MCP knows the LLM.
+
+    MCP tool calls do not include the caller model or its context window.  The
+    caller can supply either value explicitly; otherwise balanced is the least
+    surprising cross-model default.  An explicit limit with no other signal is
+    treated as intentional and is used to infer the closest capacity profile.
+    """
+    if context_window is not None and context_window < 1:
+        raise ValueError("context_window must be a positive token count")
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be at least 1")
+
+    selected = response_profile
+    reason = "explicit_profile"
+    if selected == "auto":
+        if context_window is not None:
+            if context_window <= 80_000:
+                selected = "compact"
+            elif context_window < 300_000:
+                selected = "balanced"
+            else:
+                selected = "wide"
+            reason = "context_window"
+        elif limit is not None:
+            if limit <= _SEARCH_RESPONSE_PROFILES["compact"]["max_limit"]:
+                selected = "compact"
+            elif limit <= _SEARCH_RESPONSE_PROFILES["balanced"]["max_limit"]:
+                selected = "balanced"
+            else:
+                selected = "wide"
+            reason = "explicit_limit"
+        else:
+            selected = "balanced"
+            reason = "safe_default"
+
+    spec = _SEARCH_RESPONSE_PROFILES[selected]
+    requested = spec["default_limit"] if limit is None else int(limit)
+    page_limit = max(1, min(requested, spec["max_limit"]))
+    return {
+        "requested_profile": response_profile,
+        "profile": selected,
+        "reason": reason,
+        "context_window": context_window,
+        "requested_limit": limit,
+        "page_limit": page_limit,
+        "max_limit": spec["max_limit"],
+    }
 
 
 def configure_logging(settings: Settings) -> None:
@@ -161,6 +234,13 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
             "browser_profile": str(settings.browser_profile_dir),
             "search_profiles": {k: v.get("query")
                                 for k, v in settings.search_profiles.items()},
+            "response_sizing": {
+                "model_context_not_visible_to_mcp": True,
+                "pass_to_search_jobs_and_get_job": "context_window",
+                "local_qwen_3_8_27b": 80000,
+                "profiles": _SEARCH_RESPONSE_PROFILES,
+                "unknown_context_default": "balanced",
+            },
             "home": {
                 "location": settings.applicant.get("home_location"),
                 "max_commute_miles": settings.applicant.get("max_commute_miles"),
@@ -169,7 +249,42 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
             "applicant_configured": bool(settings.applicant.get("full_name")),
         }
 
-    async def _run_search(params: SearchParams) -> dict:
+    async def _run_search(params: SearchParams, response_policy: dict[str, Any]) -> dict:
+        # duplicate-search guard: the same query re-run within 10 minutes
+        # returns the EXISTING search_id instead of hitting the boards again
+        # (weak models repeat identical searches; this saves tokens and time)
+        async def _recent_duplicate() -> str | None:
+            from datetime import UTC, datetime, timedelta
+
+            try:
+                async with db.connect(settings.db_path) as aconn:
+                    cutoff = (datetime.now(tz=UTC) - timedelta(minutes=10)) \
+                        .isoformat(timespec="seconds")
+                    cur = await aconn.execute(
+                        "SELECT id, params FROM searches "
+                        "WHERE created_at >= ? ORDER BY created_at DESC LIMIT 8",
+                        (cutoff,))
+                    for row in await cur.fetchall():
+                        try:
+                            p = json.loads(row["params"])
+                        except (TypeError, ValueError):
+                            continue
+                        if (p.get("query", "").lower() == params.query.lower()
+                                and (p.get("location") or "")
+                                == (params.location or "")):
+                            return row["id"]
+            except Exception:  # noqa: BLE001 - the guard must never break search
+                return None
+            return None
+
+        _dup_id = await _recent_duplicate()
+        if _dup_id:
+            out = await _page_results(_dup_id, response_policy, offset=0)
+            out["note_duplicate"] = (
+                "identical query ran in the last 10 minutes — returning the "
+                "existing search; PAGE it with search_id + offset instead of "
+                "re-searching")
+            return out
         from . import geo as geo_mod
 
         async with db.connect(settings.db_path) as conn:
@@ -313,23 +428,45 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                 "location_skipped": location_skipped,
                 "req_skipped": req_skipped,
                 "home": home,
+                "response_policy": response_policy,
             })
             rows = sorted(((job_ids[c], s) for c, s in best.items()), key=lambda x: -x[1])
             await db.add_search_results(conn, search_id, [
                 (job_id, score, rank) for rank, (job_id, score) in enumerate(rows, 1)
             ])
             await conn.commit()
-        return await _page_results(search_id, limit=15, offset=0,
+        return await _page_results(search_id, response_policy=response_policy, offset=0,
                                    reports=reports, merged=merged,
                                    blocked_skipped=blocked_skipped,
                                    training_skipped=training_skipped,
                                    location_skipped=location_skipped)
 
-    async def _page_results(search_id: str, limit: int, offset: int = 0,
+    async def _saved_response_policy(search_id: str) -> dict[str, Any] | None:
+        """Load the page policy saved with a previous search."""
+        async with db.connect(settings.db_path) as conn:
+            cur = await conn.execute("SELECT stats FROM searches WHERE id=?", (search_id,))
+            row = await cur.fetchone()
+        if not row or not row["stats"]:
+            return None
+        try:
+            policy = json.loads(row["stats"]).get("response_policy")
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(policy, dict) or policy.get("profile") not in {
+            "compact", "balanced", "wide"
+        }:
+            return None
+        # Re-resolve instead of trusting old or manually edited numeric bounds.
+        return _resolve_response_policy(
+            policy["profile"], policy.get("context_window"), policy.get("page_limit")
+        )
+
+    async def _page_results(search_id: str, response_policy: dict[str, Any], offset: int = 0,
                             reports: list | None = None, merged: int | None = None,
                             blocked_skipped: int | None = None,
                             training_skipped: int | None = None,
                             location_skipped: int | None = None) -> dict:
+        limit = response_policy["page_limit"]
         async with db.connect(settings.db_path) as conn:
             rows, total = await db.get_search_results(conn, search_id, limit, offset)
             if not rows and offset == 0:
@@ -350,6 +487,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                 "search_id": search_id, "total": total,
                 "showing": f"{offset + 1}-{offset + len(rows)} of {total}",
                 "next_offset": offset + limit if offset + limit < total else None,
+                "response_policy": response_policy,
                 "results": briefs,
                 "hints": [
                     "give job_ids to the user; apply via start_application",
@@ -364,6 +502,13 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                     "without user approval",
                 ],
             }
+            if out["next_offset"] is not None:
+                out["next_page"] = {
+                    "search_id": search_id,
+                    "offset": out["next_offset"],
+                    "response_profile": response_policy["profile"],
+                    "limit": limit,
+                }
             if reports is not None:
                 out["provider_reports"] = [r.model_dump() for r in reports]
             if merged is not None:
@@ -387,7 +532,9 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         profile: str | None = None,
         search_id: str | None = None,
         offset: int = 0,
-        limit: int = 15,
+        limit: int | None = None,
+        response_profile: ResponseProfile = "auto",
+        context_window: int | None = None,
         location: str | None = None,
         radius_miles: int | None = None,
         max_days_old: int | None = None,
@@ -403,7 +550,13 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
     ) -> dict:
         """Run a UK job search OR page an earlier one. Fresh search: pass
         query ('Data Analyst'…) or profile ('data_analytics'/'field_geologist').
-        Paging: pass search_id (+offset from next_offset). Results are ranked,
+        Paging: pass search_id (+offset from next_offset), preferably by copying
+        the returned next_page object. Response sizing: pass context_window and
+        auto selects compact (<=80k), balanced (80k-300k), or wide (>=300k).
+        Local Qwen 3.8 27B uses context_window=80000. You may instead pass
+        response_profile explicitly. Optional limit requests a page size within
+        that profile's safety cap (8/20/50). With no sizing signal the default is
+        balanced (12). All remaining results stay stored. Results are ranked,
         cross-board duplicates merged (sources[]), with memory flags
         (already_applied, application_status) and location intelligence
         (work_mode, distance_miles from Blackpool, location_status
@@ -415,7 +568,15 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         work_from_home=true restricts to remote.
         """
         if search_id:
-            return await _page_results(search_id, limit, offset)
+            if response_profile == "auto" and context_window is None and limit is None:
+                response_policy = await _saved_response_policy(search_id)
+            else:
+                response_policy = _resolve_response_policy(
+                    response_profile, context_window, limit
+                )
+            response_policy = response_policy or _resolve_response_policy()
+            return await _page_results(search_id, response_policy, offset)
+        response_policy = _resolve_response_policy(response_profile, context_window, limit)
         params_kwargs: dict[str, Any] = {}
         if profile:
             prof = settings.search_profiles.get(profile)
@@ -455,16 +616,32 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         params = SearchParams(**{k: v for k, v in params_kwargs.items() if v is not None})
         if not params.query:
             return {"error": "query or profile is required"}
-        return await _run_search(params)
+        return await _run_search(params, response_policy)
 
     @mcp.tool()
-    async def get_job(job_ids: list[str], include_description: bool = True) -> dict:
-        """Full record(s) for 1-5 jobs: description, all source URLs, apply
-        method + site playbook, application state, location verdict. Passing
-        several ids gives a side-by-side comparison view."""
+    async def get_job(
+        job_ids: list[str],
+        include_description: bool = False,
+        response_profile: ResponseProfile = "auto",
+        context_window: int | None = None,
+    ) -> dict:
+        """Details for selected jobs with adaptive batch sizing. Pass the same
+        context_window/response_profile used for search_jobs. Compact returns up
+        to 5 summaries or 2 full descriptions; balanced 12/5; wide 30/12.
+        Request full descriptions only for plausible finalists. No job is deleted
+        when a supplied job_ids list is truncated; request the remainder later."""
         out_jobs = []
+        response_policy = _resolve_response_policy(
+            response_profile, context_window, None
+        )
+        caps = {
+            "compact": {False: 5, True: 2},
+            "balanced": {False: 12, True: 5},
+            "wide": {False: 30, True: 12},
+        }
+        max_jobs = caps[response_policy["profile"]][include_description]
         async with db.connect(settings.db_path) as conn:
-            for jid in job_ids[:5]:
+            for jid in job_ids[:max_jobs]:
                 job = await db.get_job(conn, jid)
                 if not job:
                     out_jobs.append({"job_id": jid, "error": "unknown"})
@@ -499,7 +676,20 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                     job["application"] = {k: app[k] for k in
                                           ("id", "status", "submitted_at", "updated_at")}
                 out_jobs.append(job)
-        return {"jobs": out_jobs} if len(out_jobs) > 1 else out_jobs[0]
+        metadata = {
+            "profile": response_policy["profile"],
+            "context_window": context_window,
+            "max_jobs": max_jobs,
+            "requested_jobs": len(job_ids),
+            "returned_jobs": len(out_jobs),
+            "remaining_job_ids": job_ids[max_jobs:],
+        }
+        if len(out_jobs) > 1:
+            return {"response_policy": metadata, "jobs": out_jobs}
+        if not out_jobs:
+            return {"response_policy": metadata, "jobs": []}
+        out_jobs[0]["response_policy"] = metadata
+        return out_jobs[0]
 
     @mcp.tool()
     async def manage_blocklist(action: str = "list", kind: str = "company",
@@ -525,80 +715,142 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
             return {"blocklist": await db.blocklist_list(conn)}
 
     @mcp.tool()
-    async def fetch_job_description(job_id: str) -> dict:
-        """Fetch the FULL job description by opening the page in the browser
-        and extracting the description text. Use for jobs where the HTML/API
-        parser returned null or a short teaser (common on Totaljobs/Reed).
-        Stores the description back into the job record and re-runs the
-        requirements check against your CVs."""
+    async def fetch_job_description(job_ids: list[str]) -> dict:
+        """Fetch FULL job descriptions by opening pages in the browser.
+        Accepts 1-10 job_ids (BATCH - prefer batching to save round-trips).
+        Use for jobs where the parser returned null/short descriptions
+        (common on Totaljobs/Reed). Stores descriptions back and re-runs the
+        requirements check against your CVs. Also detects closed vacancies
+        ("no longer accepting applications")."""
         from . import requirements as req_mod
         from .browser import BrowserError, get_session
 
+        results = []
+        jobs = []
         async with db.connect(settings.db_path) as conn:
-            job = await db.get_job(conn, job_id)
-            if not job:
-                return {"error": f"unknown job_id {job_id}"}
+            for jid in job_ids[:10]:
+                job = await db.get_job(conn, jid)
+                if not job:
+                    results.append({"job_id": jid, "error": "unknown"})
+                else:
+                    jobs.append(job)
+        if not jobs:
+            return {"results": results}
+        sess = get_session(settings)
+        for job in jobs:
+            jid = job["id"]
             url = job.get("apply_url") or job.get("url")
             if not url:
-                return {"error": "job has no URL"}
-        try:
-            sess = get_session(settings)
-            opened = await sess.open(url)
-            if opened.get("error"):
-                return opened
-            await sess._active().wait_for_timeout(2500)
-            result = await sess.evaluate(
-                "() => (document.body.innerText || '').replace(/\\s+/g, ' ')")
-            full_text = (result.get("result") or "")
-            # find the description region: after the header/breadcrumbs,
-            # before the apply/footer
-            desc_start = full_text.find("Job description")
-            if desc_start == -1:
-                desc_start = full_text.find("About the role")
-            if desc_start == -1:
-                desc_start = 500  # skip header/nav
-            desc_end = full_text.rfind("Apply")
-            if desc_end == -1 or desc_end <= desc_start:
-                desc_end = len(full_text)
-            description = full_text[desc_start:desc_end].strip()[:8000]
-        except BrowserError as exc:
-            return {"error": str(exc)}
-
-        async with db.connect(settings.db_path) as conn:
-            await conn.execute(
-                "UPDATE jobs SET description=? WHERE id=?",
-                (description, job_id))
-            # re-run requirements check
-            cur = await conn.execute(
-                "SELECT full_text FROM cvs ORDER BY length(full_text) DESC LIMIT 3")
-            cv_rows = await cur.fetchall()
-            cv_text = "\n".join((r["full_text"] or "") for r in cv_rows)
-            reqs = req_mod.extract_requirements(description)
-            match = req_mod.match_requirements(reqs, cv_text)
-            await conn.execute(
-                "UPDATE jobs SET extra=COALESCE(extra,'{}') WHERE id=?",
-                (job_id,))
-            cur2 = await conn.execute("SELECT extra FROM jobs WHERE id=?", (job_id,))
-            row = await cur2.fetchone()
-            extra = {}
+                results.append({"job_id": jid, "error": "no URL"})
+                continue
             try:
-                extra = json.loads(row["extra"] or "{}")
-            except (TypeError, ValueError):
-                pass
-            extra["requirements_status"] = match["status"]
-            extra["requirements_unmet"] = [r["value"] for r in match["unmet"]]
-            await conn.execute("UPDATE jobs SET extra=? WHERE id=?",
-                               (json.dumps(extra, ensure_ascii=False), job_id))
-            await conn.commit()
-        return {
-            "job_id": job_id,
-            "description_length": len(description),
-            "description_preview": description[:500],
-            "requirements_status": match["status"],
-            "requirements_unmet": [r["value"] for r in match["unmet"]],
-            "requirements_hard": [r["value"] for r in reqs["hard"]],
-            "note": "description stored; requirements checked against your CVs",
-        }
+                await sess.open(url)
+                await sess._active().wait_for_timeout(2500)
+                result = await sess.evaluate(
+                    "() => (document.body.innerText || '').replace(/\\s+/g, ' ')")
+                full_text = (result.get("result") or "")
+                desc_start = full_text.find("Job description")
+                if desc_start == -1:
+                    desc_start = full_text.find("About the role")
+                if desc_start == -1:
+                    desc_start = 500
+                desc_end = full_text.rfind("Apply")
+                if desc_end == -1 or desc_end <= desc_start:
+                    desc_end = len(full_text)
+                description = full_text[desc_start:desc_end].strip()[:8000]
+                closed = any(marker in full_text.lower() for marker in
+                             ("no longer accepting", "can no longer apply",
+                              "vacancy has been closed", "position has been filled",
+                              "closing date has passed"))
+            except BrowserError as exc:
+                results.append({"job_id": jid, "error": str(exc)})
+                continue
+
+            async with db.connect(settings.db_path) as conn:
+                await conn.execute(
+                    "UPDATE jobs SET description=? WHERE id=?", (description, jid))
+                cur = await conn.execute(
+                    "SELECT full_text FROM cvs ORDER BY length(full_text) DESC LIMIT 3")
+                cv_rows = await cur.fetchall()
+                cv_text = "\n".join((r["full_text"] or "") for r in cv_rows)
+                reqs = req_mod.extract_requirements(description)
+                match = req_mod.match_requirements(reqs, cv_text)
+                cur2 = await conn.execute("SELECT extra FROM jobs WHERE id=?", (jid,))
+                row = await cur2.fetchone()
+                extra = {}
+                try:
+                    extra = json.loads(row["extra"] or "{}")
+                except (TypeError, ValueError):
+                    pass
+                extra["requirements_status"] = match["status"]
+                extra["requirements_unmet"] = [r["value"] for r in match["unmet"]]
+                await conn.execute("UPDATE jobs SET extra=? WHERE id=?",
+                                   (json.dumps(extra, ensure_ascii=False), jid))
+                await conn.commit()
+            results.append({
+                "job_id": jid,
+                "description_length": len(description),
+                "description_preview": description[:400],
+                "requirements_status": match["status"],
+                "requirements_unmet": [r["value"] for r in match["unmet"]],
+                "vacancy_closed": closed or None,
+            })
+        return {"results": results}
+
+    @mcp.tool()
+    async def list_stored_jobs(
+        query: str | None = None,
+        company: str | None = None,
+        location: str | None = None,
+        source: str | None = None,
+        days_old: int = 7,
+        limit: int = 20,
+    ) -> dict:
+        """Search the LOCAL job database by criteria (no board calls). Use
+        INSTEAD of Bash/sqlite: find all jobs from a company, filter by title
+        keyword, location, source board, or freshness. Returns job_ids +
+        titles + requirements status - then get_job / fetch_job_description
+        for detail."""
+        async with db.connect(settings.db_path) as conn:
+            sql = ("SELECT id, title, company, location_text, salary_raw, "
+                   "posted_at, source, extra, description FROM jobs "
+                   "WHERE last_seen >= datetime('now', ?)")
+            args: list = [f"-{days_old} days"]
+            if query:
+                sql += " AND (title LIKE ? OR description LIKE ?)"
+                args += [f"%{query}%", f"%{query}%"]
+            if company:
+                sql += " AND company LIKE ?"
+                args.append(f"%{company}%")
+            if location:
+                sql += " AND location_text LIKE ?"
+                args.append(f"%{location}%")
+            if source:
+                sql += " AND source = ?"
+                args.append(source)
+            sql += " ORDER BY posted_at DESC LIMIT ?"
+            args.append(limit)
+            cur = await conn.execute(sql, args)
+            rows = []
+            for r in await cur.fetchall():
+                extra = {}
+                try:
+                    extra = json.loads(r["extra"] or "{}")
+                except (TypeError, ValueError):
+                    pass
+                rows.append({
+                    "job_id": r["id"], "title": r["title"],
+                    "company": r["company"], "location": r["location_text"],
+                    "salary": r["salary_raw"], "posted_at": r["posted_at"],
+                    "source": r["source"],
+                    "requirements_status": extra.get("requirements_status"),
+                    "requirements_unmet": extra.get("requirements_unmet"),
+                    "has_description": bool(r["description"]
+                                            and len(r["description"]) > 200),
+                })
+            return {"jobs": rows, "count": len(rows),
+                    "note": "get_job for full records; fetch_job_description "
+                            "to enrich missing ones"}
 
     @mcp.tool()
     async def submit_job_observations(

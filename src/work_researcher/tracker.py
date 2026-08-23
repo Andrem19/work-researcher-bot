@@ -27,7 +27,13 @@ PLAYBOOKS: dict[str, str] = {
         "SUPPORTING FILES must be LARGER than 8KB — generate cover letters "
         "with make_cover_letter (DOCX, auto-padded). Uploads go through "
         "browser_upload directly on the hidden input[type=file] element "
-        "(no native chooser needed)."
+        "(no native chooser needed). CAUTION: the browser profile may keep "
+        "STALE TABS from previous sessions (old confirmation pages) — always "
+        "verify you are on the CURRENT job page (check the URL) before "
+        "concluding anything. Board apply redirects may lead to gov.uk "
+        "'Find an apprenticeship' — if it says 'no longer accepting', the "
+        "vacancy is CLOSED: mark the application failed and tell the user. "
+        "My applications: https://www.totaljobs.com/profile (not /applications)."
     ),
     "cv-library": (
         "CV-Library: job page → 'Apply for job' → account CV or upload → quick "
@@ -162,7 +168,12 @@ async def start_application(conn: aiosqlite.Connection, settings: Settings,
                                          notes)
     method, apply_url, method_cautions = _apply_method(job)
     steps = [
+        "VERIFY THE VACANCY IS LIVE: open the job URL; if the page says "
+        "'no longer accepting' / 'closed' → mark this application failed "
+        "and inform the user (boards keep stale ads for days)",
         f"Open {apply_url} with browser_open (headed mode keeps logins)",
+        "Check the browser tab URL matches THIS job — stale tabs from "
+        "previous sessions may be open; use browser_tabs to switch",
         "Sign in / create the account if the board requires it (persist in the profile)",
         f"Upload CV: {(chosen or {}).get('path') or 'pick via list_cvs'}",
         "Fill the form with the applicant profile values (see applicant block)",
