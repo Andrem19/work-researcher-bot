@@ -112,6 +112,11 @@ _FORM_JS = r"""
 
 _MODAL_TAGGER_JS = r"""
 () => {
+  // Modal element numbers must be the only active namespace. Without clearing
+  // the background page, browser_set(0) can resolve the first page field with
+  // data-wr-n="0" instead of the modal control the agent just observed.
+  document.querySelectorAll('[data-wr-n]').forEach(
+    el => el.removeAttribute('data-wr-n'));
   const dialogs = Array.from(document.querySelectorAll(
     '[role="dialog"], [role="alertdialog"], .modal.show, [aria-modal="true"]'));
   // keep only the truly visible dialog (hidden templates like
