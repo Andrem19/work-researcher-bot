@@ -39,12 +39,15 @@ AGENCY_BRANDS = (
     "noir", "oscar", "zachary daniels", "nowskills", "back 2 work",
     "ernest gordon", "bridgewater resources", "halecroft",
     "njr", "apsley", "finlay jude",
+    "allstaff", "the huntsmith", "huntsmith",
 )
 
 AGENCY_DESCRIPTION_PHRASES = (
     "our client is seeking", "our client is looking", "on behalf of our client",
     "our client, a ", "we are recruiting for a", "our prestigious client",
     "our client based", "client of ours",
+    "acting as an employment agency", "operating as an employment agency",
+    "employment agency for permanent",
 )
 
 

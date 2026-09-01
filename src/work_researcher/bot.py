@@ -43,6 +43,14 @@ LOCAL_DISCOVERY_QUERIES = {
 }
 
 
+def _report_signature(job: dict) -> tuple[str, str, str]:
+    """Identify regional copies of the same employer/title/salary advert."""
+    normalized = []
+    for field in ("title", "company", "salary_raw"):
+        normalized.append(re.sub(r"[^a-z0-9]+", " ", str(job.get(field) or "").lower()).strip())
+    return tuple(normalized)
+
+
 def _apply_global_ranking(jobs: list[dict], ranking: list[dict]) -> list[dict]:
     """Apply a possibly partial GLM ranking while preserving every eligible job."""
     def rank_value(item: dict) -> int:
@@ -400,9 +408,14 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
             logger.warning("GLM global rerank failed; keeping batch-score order: %s", exc)
     per_path = defaultdict(int)
     selected = []
+    report_signatures = set()
     for job in jobs:
+        signature = _report_signature(job)
+        if signature in report_signatures:
+            continue
         if per_path[job["path_id"]] >= int(settings.report.get("max_per_path", 12)):
             continue
+        report_signatures.add(signature)
         per_path[job["path_id"]] += 1
         selected.append(job)
         if len(selected) >= int(settings.report.get("max_jobs", 40)):

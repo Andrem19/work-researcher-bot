@@ -14,6 +14,11 @@ ENTRY_RE = re.compile(r"\b(junior|trainee|graduate|entry[ -]level|associate|leve
 YEARS_RE = re.compile(r"\b([3-9]|\d{2,})\+?\s+years?\b", re.I)
 REMOTE_RE = re.compile(r"\b(remote|work from home|wfh|home[ -]based|anywhere in (?:the )?uk)\b", re.I)
 HYBRID_RE = re.compile(r"\bhybrid\b", re.I)
+ONSITE_ONLY_RE = re.compile(
+    r"\b(?:fully|entirely)\s+on[ -]?site\b|\bno\s+(?:remote|home[ -]?working|"
+    r"work[ -]?from[ -]?home|wfh)\b|\bno\s+remote\s+or\s+work[ -]?from[ -]?home\b",
+    re.I,
+)
 CLOSED_RE = re.compile(
     r"\b(?:this\s+)?(?:job|role|vacancy|position|advert(?:isement)?)\s+(?:has\s+)?"
     r"(?:expired|closed)|\bapplications?\s+(?:are\s+)?(?:now\s+)?closed\b|"
@@ -99,7 +104,9 @@ def vacancy_status(card: JobCard, *, today: date | None = None) -> dict[str, Any
 
 
 def work_mode(card: JobCard) -> str:
-    text = f"{card.title or ''} {card.description or ''}"
+    text = f"{card.title or ''} {card.contract_type or ''} {card.description or ''}"
+    if ONSITE_ONLY_RE.search(text):
+        return "on_site"
     if HYBRID_RE.search(text):
         return "hybrid"
     if REMOTE_RE.search(text) or card.work_from_home is True:

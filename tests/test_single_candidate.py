@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from work_researcher import persistence as db
-from work_researcher.bot import _apply_global_ranking, _build_ranked_jobs
+from work_researcher.bot import _apply_global_ranking, _build_ranked_jobs, _report_signature
 from work_researcher.career import deterministic_assessment, location_allowed, vacancy_status
 from work_researcher.config import load_settings
 from work_researcher.domain import JobCard
@@ -41,11 +41,31 @@ def test_location_policy() -> None:
     assert location_allowed(hybrid)[0] is True
 
 
+def test_negated_remote_wording_does_not_bypass_onsite_policy() -> None:
+    card = JobCard(
+        source="test", title="Junior Support Analyst", company="Acme",
+        location_text="Paisley", contract_type="On-site Permanent Full time",
+        description="This is fully onsite. There is no remote or work-from-home element.",
+    )
+    assert location_allowed(card) == (False, "on_site: outside allowed area")
+
+
 def test_agency_and_senior_roles_are_rejected() -> None:
     agency = JobCard(source="test", title="Junior Data Engineer", company="Hays", location_text="Remote", description="Remote UK")
     senior = JobCard(source="test", title="Senior Data Engineer", company="Acme", location_text="Blackpool")
     assert deterministic_assessment(agency, "data_engineering", "Python SQL")["eligible"] is False
     assert deterministic_assessment(senior, "data_engineering", "Python SQL")["eligible"] is False
+
+
+def test_known_agencies_from_live_results_are_rejected() -> None:
+    for company in ("Allstaff", "The Huntsmith Limited"):
+        card = JobCard(
+            source="test", title="Junior Data Analyst", company=company,
+            location_text="Remote", description="Remote UK",
+        )
+        result = deterministic_assessment(card, "analytics", "SQL Power BI")
+        assert result["eligible"] is False
+        assert result["posted_by"] == "agency"
 
 
 def test_apprentice_role_with_manager_in_occupation_name_is_entry_level() -> None:
@@ -134,6 +154,17 @@ def test_global_ranking_reorders_but_never_drops_jobs() -> None:
     assert result[0]["overall_score"] == 93
     assert result[0]["rank_reason_ru"] == "Лучший fit"
     assert [job["global_rank"] for job in result] == [1, 2, 3]
+
+
+def test_report_signature_collapses_regional_copies_of_one_advert() -> None:
+    blackpool = {
+        "title": "Data Engineer Level I", "company": "DWP Digital",
+        "salary_raw": "£38,772", "location_text": "Blackpool",
+    }
+    manchester = {**blackpool, "location_text": "Manchester"}
+    different_role = {**blackpool, "title": "Data Engineer"}
+    assert _report_signature(blackpool) == _report_signature(manchester)
+    assert _report_signature(blackpool) != _report_signature(different_role)
 
 
 def test_explicitly_closed_and_expired_vacancies_are_rejected() -> None:
