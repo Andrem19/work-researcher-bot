@@ -39,6 +39,7 @@ timeout_s = 150
 batch_size = 3
 max_attempts = 3
 max_tokens = 4096
+rerank_max_tokens = 4096
 
 [telegram]
 enabled = true

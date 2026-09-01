@@ -47,7 +47,7 @@ DEFAULTS: dict = {
     "llm": {
         "enabled": True, "base_url": "https://api.z.ai/api/coding/paas/v4",
         "model": "glm-5.3-flash", "timeout_s": 150, "batch_size": 3,
-        "max_attempts": 3, "max_tokens": 4096,
+        "max_attempts": 3, "max_tokens": 4096, "rerank_max_tokens": 4096,
     },
     "telegram": {"enabled": True, "chat_id": "", "parse_mode": "HTML", "disable_web_page_preview": True},
     "report": {

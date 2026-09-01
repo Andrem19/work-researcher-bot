@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import itertools
 import json
 import logging
@@ -20,7 +21,7 @@ from .config import Settings, ensure_dirs
 from .cvmanager import extract_text
 from .domain import JobCard, SearchParams
 from .drive import sync_cvs_from_drive
-from .llm import assess_batch
+from .llm import assess_batch, rerank_shortlist
 from .providers import run_search
 from .telegram import render_report, send_messages
 from .textutils import job_hash
@@ -33,6 +34,55 @@ PATH_KEYWORDS = {
     "analytics": ("data analyst", "analytics", "power bi", "tableau", "dashboard", "reporting"),
     "software_data_platform": ("python developer", "software engineer", "backend", "api", "application developer"),
 }
+
+LOCAL_DISCOVERY_QUERIES = {
+    "data_engineering": "data engineer",
+    "geospatial_data": "GIS data analyst",
+    "analytics": "data analyst",
+    "software_data_platform": "junior python developer",
+}
+
+
+def _apply_global_ranking(jobs: list[dict], ranking: list[dict]) -> list[dict]:
+    """Apply a possibly partial GLM ranking while preserving every eligible job."""
+    def rank_value(item: dict) -> int:
+        try:
+            return int(item.get("rank") or 1_000_000)
+        except (TypeError, ValueError):
+            return 1_000_000
+
+    by_key = {str(job.get("job_key")): job for job in jobs}
+    original_order = {str(job.get("job_key")): index for index, job in enumerate(jobs)}
+    valid = []
+    seen = set()
+    for item in sorted(
+        ranking,
+        key=rank_value,
+    ):
+        key = str(item.get("job_key", ""))
+        if key not in by_key or key in seen:
+            continue
+        seen.add(key)
+        valid.append((key, item))
+    for key in sorted(by_key, key=lambda value: original_order[value]):
+        if key not in seen:
+            valid.append((key, {}))
+    ordered = []
+    for rank, (key, item) in enumerate(valid, 1):
+        job = by_key[key]
+        final_score = item.get("final_score")
+        if final_score is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                job["overall_score"] = max(0, min(100, int(final_score)))
+        for field in (
+            "rank_reason_ru", "entry_evidence", "main_tradeoff_ru",
+            "deadline_urgency", "vacancy_live_confidence",
+        ):
+            if item.get(field) not in (None, "", []):
+                job[field] = item[field]
+        job["global_rank"] = rank
+        ordered.append(job)
+    return ordered
 
 
 def _build_ranked_jobs(assessment_map: dict[str, dict], candidate_map: dict, settings: Settings) -> list[dict]:
@@ -60,6 +110,21 @@ def _build_ranked_jobs(assessment_map: dict[str, dict], candidate_map: dict, set
             "work_mode": base["work_mode"], "path_id": base["path_id"],
             "path_label": settings.career_paths[base["path_id"]]["label"],
             "cv_filename": cv["filename"],
+            "deterministic_score": base.get("base_score"),
+            "entry_reason": base.get("entry_reason"),
+            "location_reason": base.get("location_reason"),
+            "requirements_status": base.get("requirements_status"),
+            "deadline": assessment.get("deadline") or base.get("deadline"),
+            "deadline_urgency": (
+                assessment.get("deadline_urgency") or base.get("deadline_urgency")
+            ),
+            "vacancy_live_confidence": (
+                assessment.get("vacancy_live_confidence")
+                or base.get("vacancy_live_confidence")
+            ),
+            "contract_type": card.contract_type,
+            "posted_at": card.posted_at.isoformat() if card.posted_at else None,
+            "description_evidence": (card.description or "")[:1200],
             "glm_recommended": glm_recommended,
             "glm_direct_employer": glm_direct,
             "review_tier": review_tier,
@@ -146,11 +211,20 @@ async def _collect(settings: Settings) -> tuple[list[tuple[str, JobCard]], list[
     health: dict[str, dict] = defaultdict(lambda: {"ok": False, "jobs": 0, "errors": []})
     semaphore = asyncio.Semaphore(3)
 
-    async def one(path_id: str, query_text: str):
+    async def one(
+        path_id: str,
+        query_text: str,
+        *,
+        location: str = "UK",
+        sources: list[str] | None = None,
+        max_days_old: int | None = None,
+    ):
         async with semaphore:
             params = SearchParams(
-                query=query_text, location="UK", max_days_old=settings.default_max_days_old,
+                query=query_text, location=location,
+                max_days_old=max_days_old or settings.default_max_days_old,
                 limit_per_source=settings.default_limit_per_source, exclude_training=True,
+                sources=sources,
             )
             cards_by_provider, reports = await run_search(settings, params.model_dump())
             for report in reports:
@@ -166,6 +240,26 @@ async def _collect(settings: Settings) -> tuple[list[tuple[str, JobCard]], list[
     for path_id, spec in settings.career_paths.items():
         for query in spec.get("queries", []):
             tasks.append(one(path_id, query))
+    # The successful interactive search did not rely solely on national result
+    # pages: it ran broad role-family searches in each allowed local geography.
+    # This prevents a strong Blackpool/Preston vacancy from being buried below
+    # the first page of national results.
+    local_sources = ["totaljobs", "reed", "findajob", "civil_service"]
+    if settings.secret("adzuna", "app_id") and settings.secret("adzuna", "app_key"):
+        local_sources.append("adzuna")
+    if settings.secret("jooble", "api_key"):
+        local_sources.append("jooble")
+    for path_id, query in LOCAL_DISCOVERY_QUERIES.items():
+        if path_id not in settings.career_paths:
+            continue
+        for location in ("Blackpool", "Preston", "Lancashire", "Manchester"):
+            tasks.append(one(
+                path_id,
+                query,
+                location=location,
+                sources=local_sources,
+                max_days_old=30,
+            ))
     await asyncio.gather(*tasks)
     reports = [
         {"provider": name, "ok": state["ok"], "jobs": state["jobs"],
@@ -244,7 +338,7 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
             "title": card.title, "company": card.company, "location": card.location_text,
             "salary": card.salary_raw, "source": card.source, "url": card.url,
             "description": (card.description or "")[:6000], "deterministic": base,
-            "cv_filename": cv["filename"], "cv_excerpt": cv["text"][:4500],
+            "cv_filename": cv["filename"], "cv_excerpt": cv["text"][:10000],
         })
         candidate_map[key] = (card, base, cv)
 
@@ -297,6 +391,13 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
             }
 
     jobs = _build_ranked_jobs(assessment_map, candidate_map, settings)
+    if len(jobs) > 1:
+        logger.info("GLM global comparative rerank: %d jobs", len(jobs))
+        try:
+            ranking = await rerank_shortlist(settings, jobs)
+            jobs = _apply_global_ranking(jobs, ranking)
+        except Exception as exc:
+            logger.warning("GLM global rerank failed; keeping batch-score order: %s", exc)
     per_path = defaultdict(int)
     selected = []
     for job in jobs:

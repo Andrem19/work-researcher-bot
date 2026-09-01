@@ -4,8 +4,8 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from work_researcher import persistence as db
-from work_researcher.bot import _build_ranked_jobs
-from work_researcher.career import deterministic_assessment, location_allowed
+from work_researcher.bot import _apply_global_ranking, _build_ranked_jobs
+from work_researcher.career import deterministic_assessment, location_allowed, vacancy_status
 from work_researcher.config import load_settings
 from work_researcher.domain import JobCard
 from work_researcher.drive import _select
@@ -77,6 +77,9 @@ def test_telegram_uses_five_detailed_then_compact_cards() -> None:
         "mandatory_requirements": ["SQL"], "desirable_requirements": ["Python"],
         "special_conditions": [], "cv_strengths": ["SQL"], "cv_gaps": [],
         "rejection_reasons": [], "cv_filename": "analytics.docx", "source": "test",
+        "rank_reason_ru": "Лучшее сочетание entry-сигналов и географии.",
+        "entry_evidence": ["Training provided"],
+        "main_tradeoff_ru": "Зарплата не указана.",
     }
     messages = render_report(
         [{**job, "title": f"Junior Data Analyst {index}"} for index in range(1, 7)],
@@ -88,6 +91,9 @@ def test_telegram_uses_five_detailed_then_compact_cards() -> None:
     assert len(messages) == 7
     assert "Обязательные требования" in messages[5]
     assert "Обязательные требования" not in messages[6]
+    assert "Суть" not in messages[6]
+    assert "Почему в топе" in messages[6]
+    assert "Главный нюанс" in messages[6]
     assert "Подробности доступны по ссылке" in messages[6]
     assert "первые <b>5</b> подробно" in messages[0]
 
@@ -110,6 +116,51 @@ def test_glm_cannot_veto_a_hard_filtered_vacancy() -> None:
     assert jobs[0]["hard_filters_passed"] is True
     assert jobs[0]["review_tier"] == "fallback"
     assert jobs[0]["direct_employer"] is True
+
+
+def test_global_ranking_reorders_but_never_drops_jobs() -> None:
+    jobs = [
+        {"job_key": "a", "overall_score": 80},
+        {"job_key": "b", "overall_score": 70},
+        {"job_key": "c", "overall_score": 60},
+    ]
+    ranking = [
+        {"job_key": "b", "rank": 1, "final_score": 93, "rank_reason_ru": "Лучший fit"},
+        {"job_key": "a", "rank": "invalid", "final_score": 82},
+        {"job_key": "b", "rank": 2, "final_score": 10},
+    ]
+    result = _apply_global_ranking(jobs, ranking)
+    assert [job["job_key"] for job in result] == ["b", "a", "c"]
+    assert result[0]["overall_score"] == 93
+    assert result[0]["rank_reason_ru"] == "Лучший fit"
+    assert [job["global_rank"] for job in result] == [1, 2, 3]
+
+
+def test_explicitly_closed_and_expired_vacancies_are_rejected() -> None:
+    closed = JobCard(
+        source="test", title="Junior Data Analyst", company="Acme",
+        location_text="Blackpool", description="Applications are now closed.",
+    )
+    expired = JobCard(
+        source="test", title="Junior Data Analyst", company="Acme",
+        location_text="Blackpool", description="Closing date: 31 August 2020",
+    )
+    assert vacancy_status(closed, today=__import__("datetime").date(2026, 9, 1))["closed"]
+    status = vacancy_status(expired, today=__import__("datetime").date(2026, 9, 1))
+    assert status["deadline"] == "2020-08-31"
+    assert status["deadline_urgency"] == "expired"
+    assert deterministic_assessment(expired, "analytics", "SQL Power BI")["eligible"] is False
+
+
+def test_upcoming_deadline_is_retained_and_marked_urgent() -> None:
+    card = JobCard(
+        source="test", title="Junior Data Analyst", company="Acme",
+        location_text="Blackpool", description="Applications close: 3 September 2026",
+    )
+    status = vacancy_status(card, today=__import__("datetime").date(2026, 9, 1))
+    assert status["closed"] is False
+    assert status["deadline"] == "2026-09-03"
+    assert status["deadline_urgency"] == "urgent"
 
 
 def test_drive_selection_excludes_geology(tmp_path: Path) -> None:

@@ -63,11 +63,15 @@ def render_report(
             f"🧭 <b>Линия:</b> {_value(job.get('path_label'))} | <b>Score:</b> {_value(job.get('overall_score'))}/100\n"
             f"📍 <b>Место:</b> {_value(job.get('location_text'))} | <b>Формат:</b> {_value(job.get('work_mode'))}\n"
             f"💷 <b>Зарплата:</b> {_value(salary)}\n"
-            f"📝 <b>Суть:</b> {_value(job.get('summary_ru'))}\n"
         )
         if index <= detailed_jobs:
             block = (
                 common
+                + f"🎯 <b>Почему это место:</b> {_value(job.get('rank_reason_ru'))}\n"
+                + f"🌱 <b>Entry-сигналы:</b> {_value(job.get('entry_evidence'))}\n"
+                + f"📝 <b>Суть:</b> {_value(job.get('summary_ru'))}\n"
+                + f"⏳ <b>Срок подачи:</b> {_value(job.get('deadline'))} | "
+                + f"<b>Срочность:</b> {_value(job.get('deadline_urgency'))}\n"
                 + f"🔐 <b>Прямой работодатель:</b> {_value(job.get('direct_employer_reason'))}\n"
                 + f"❗ <b>Обязательные требования:</b> {_value(job.get('mandatory_requirements'))}\n"
                 + f"<b>Desirable:</b> {_value(job.get('desirable_requirements'))}\n"
@@ -81,6 +85,8 @@ def render_report(
         else:
             block = (
                 common
+                + f"🎯 <b>Почему в топе:</b> {_value(job.get('rank_reason_ru'))}\n"
+                + f"⚠️ <b>Главный нюанс:</b> {_value(job.get('main_tradeoff_ru'))}\n"
                 + f"🔎 <b>Источник:</b> {_value(job.get('source'))}\n"
                 + "ℹ️ Подробности доступны по ссылке в названии вакансии."  # noqa: RUF001
             )

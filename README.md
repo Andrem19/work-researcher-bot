@@ -26,8 +26,13 @@
 - senior/lead/manager роли, требования 3+ лет и платные training/course ads
   исключаются;
 - GLM ранжирует, проверяет обязательные и желательные требования, специальные
-  условия, соответствие выбранному CV и формирует русское резюме; он не может
-  исключить vacancy, уже прошедшую жёсткие фильтры;
+  условия, соответствие выбранному CV и формирует русское резюме; после
+  пакетной проверки отдельный проход сравнивает весь shortlist на единой шкале;
+  модель ищет явные entry-сигналы (обучение, mentoring, приглашение кандидатов,
+  которые соответствуют не всем критериям) и не может исключить vacancy, уже
+  прошедшую жёсткие фильтры;
+- вакансии с явной пометкой closed/expired или истёкшим указанным closing date
+  исключаются до отчёта, а близкий deadline повышает срочность рассмотрения;
 - уже доставленные вакансии хранятся в SQLite и повторно не отправляются.
 
 ## Runtime
@@ -35,9 +40,11 @@
 ```text
 22:00 Europe/London
   -> public Google Drive: download + validate exactly four non-geology CVs
-  -> configured job providers, включая GOV.UK Find a job и Civil Service Careers
+  -> national queries + отдельные Blackpool/Preston/Lancashire/Manchester queries
+     across configured providers, включая GOV.UK Find a job и Civil Service Careers
   -> deterministic entry/location/agency filters
-  -> GLM-5.3-Flash structured assessment and ranking
+  -> GLM-5.3-Flash full-description assessment
+  -> one global comparative rerank of every hard-filtered candidate
   -> Telegram HTML header + one detailed vacancy card per message
   -> delivery state saved only after Telegram succeeds
 ```
