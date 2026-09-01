@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any
@@ -52,11 +53,28 @@ async def assess_batch(settings: Settings, items: list[dict]) -> list[dict]:
         "temperature": 0.1,
         "response_format": {"type": "json_object"},
     }
-    timeout = float(settings.llm.get("timeout_s", 90))
+    timeout = float(settings.llm.get("timeout_s", 150))
+    attempts = max(1, int(settings.llm.get("max_attempts", 3)))
+    payload["max_tokens"] = int(settings.llm.get("max_tokens", 4096))
     async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(url, headers={"Authorization": f"Bearer {settings.zai_api_key}"}, json=payload)
-        response.raise_for_status()
-        data = response.json()
+        for attempt in range(attempts):
+            try:
+                response = await client.post(
+                    url,
+                    headers={"Authorization": f"Bearer {settings.zai_api_key}"},
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+                break
+            except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
+                if attempt + 1 >= attempts:
+                    raise
+                await asyncio.sleep(2 ** attempt)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code not in {429, 500, 502, 503, 504} or attempt + 1 >= attempts:
+                    raise
+                await asyncio.sleep(2 ** attempt)
     content = data["choices"][0]["message"]["content"]
     parsed = _json_payload(content)
     if isinstance(parsed, dict):

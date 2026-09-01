@@ -45,10 +45,14 @@ DEFAULTS: dict = {
     },
     "llm": {
         "enabled": True, "base_url": "https://api.z.ai/api/coding/paas/v4",
-        "model": "glm-5.3-flash", "timeout_s": 90, "batch_size": 6,
+        "model": "glm-5.3-flash", "timeout_s": 150, "batch_size": 3,
+        "max_attempts": 3, "max_tokens": 4096,
     },
     "telegram": {"enabled": True, "chat_id": "", "parse_mode": "HTML", "disable_web_page_preview": True},
-    "report": {"max_jobs": 40, "max_per_path": 12, "include_seen": False},
+    "report": {
+        "max_jobs": 40, "max_per_path": 12,
+        "pre_llm_max_per_path": 15, "include_seen": False,
+    },
     "career_paths": {
         "data_engineering": {
             "label": "Data Engineering",

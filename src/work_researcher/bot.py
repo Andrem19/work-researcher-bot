@@ -58,14 +58,13 @@ def _assign_cvs(settings: Settings) -> dict[str, dict]:
     return {path_id: cv for path_id, cv in zip(path_ids, best, strict=True)}
 
 
-async def _enrich(card: JobCard) -> None:
+async def _enrich(card: JobCard, client: httpx.AsyncClient) -> None:
     if len(card.description or "") >= 500 or not card.url:
         return
     try:
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"}) as client:
-            response = await client.get(card.url)
-            if response.status_code != 200:
-                return
+        response = await client.get(card.url)
+        if response.status_code != 200:
+            return
         tree = HTMLParser(response.text)
         for script in tree.css('script[type="application/ld+json"]'):
             try:
@@ -83,6 +82,22 @@ async def _enrich(card: JobCard) -> None:
             card.description = body[:12000]
     except Exception as exc:
         logger.warning("description enrichment failed for %s: %s", card.url, exc)
+
+
+async def _enrich_all(records: list[dict]) -> None:
+    """Enrich cards with bounded sockets and memory, reusing one HTTP pool."""
+    semaphore = asyncio.Semaphore(8)
+    async with httpx.AsyncClient(
+        timeout=15,
+        follow_redirects=True,
+        headers={"User-Agent": "Mozilla/5.0"},
+        limits=httpx.Limits(max_connections=8, max_keepalive_connections=8),
+    ) as client:
+        async def one(record: dict) -> None:
+            async with semaphore:
+                await _enrich(record["card"], client)
+
+        await asyncio.gather(*(one(record) for record in records))
 
 
 async def _collect(settings: Settings) -> tuple[list[tuple[str, JobCard]], list[dict]]:
@@ -123,8 +138,10 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
     ensure_dirs(settings)
     started = datetime.now(UTC)
     cv_sync = await sync_cvs_from_drive(settings)
+    logger.info("CV sync completed: %d files", len(cv_sync.get("files", [])))
     cvs = _assign_cvs(settings)
     tagged_cards, provider_health = await _collect(settings)
+    logger.info("Provider collection completed: %d tagged cards", len(tagged_cards))
 
     # Collapse duplicate listings while retaining every career-path match.
     by_hash: dict[str, dict] = {}
@@ -134,7 +151,8 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
         record["paths"].add(path_id)
         if len(card.description or "") > len(record["card"].description or ""):
             record["card"] = card
-    await asyncio.gather(*[_enrich(record["card"]) for record in by_hash.values()])
+    await _enrich_all(list(by_hash.values()))
+    logger.info("Description enrichment completed: %d unique cards", len(by_hash))
 
     candidates = []
     for key, record in by_hash.items():
@@ -146,6 +164,7 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
                 best = assessment
         if best and best["eligible"]:
             candidates.append((key, card, best))
+    logger.info("Deterministic screening completed: %d eligible cards", len(candidates))
 
     pool_cards = [record["card"] for record in by_hash.values()]
     async with db.connect(settings.db_path) as conn:
@@ -156,9 +175,26 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
         await conn.commit()
 
     allow_seen = settings.report.get("include_seen", False) if include_seen is None else include_seen
+    candidates.sort(
+        key=lambda item: (
+            -item[2]["base_score"],
+            -len(item[1].description or ""),
+            item[1].title or "",
+        )
+    )
+    pre_llm_per_path = int(settings.report.get("pre_llm_max_per_path", 15))
+    pre_llm_counts = defaultdict(int)
+    shortlist = []
+    for item in candidates:
+        path_id = item[2]["path_id"]
+        if pre_llm_counts[path_id] >= pre_llm_per_path:
+            continue
+        pre_llm_counts[path_id] += 1
+        shortlist.append(item)
+
     llm_items = []
     candidate_map = {}
-    for key, card, base in candidates:
+    for key, card, base in shortlist:
         if not (allow_seen or key not in already_delivered):
             continue
         cv = cvs[base["path_id"]]
@@ -166,14 +202,19 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
             "job_key": key, "career_path": settings.career_paths[base["path_id"]]["label"],
             "title": card.title, "company": card.company, "location": card.location_text,
             "salary": card.salary_raw, "source": card.source, "url": card.url,
-            "description": (card.description or "")[:10000], "deterministic": base,
-            "cv_filename": cv["filename"], "cv_excerpt": cv["text"][:10000],
+            "description": (card.description or "")[:6000], "deterministic": base,
+            "cv_filename": cv["filename"], "cv_excerpt": cv["text"][:4500],
         })
         candidate_map[key] = (card, base, cv)
 
     assessments = []
     batch_size = int(settings.llm.get("batch_size", 6))
     for offset in range(0, len(llm_items), batch_size):
+        logger.info(
+            "GLM batch %d/%d",
+            offset // batch_size + 1,
+            (len(llm_items) + batch_size - 1) // batch_size,
+        )
         assessments.extend(await assess_batch(settings, llm_items[offset:offset + batch_size]))
 
     jobs = []
@@ -215,6 +256,7 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
                 [str(job["job_key"]) for job in selected],
                 message_ids,
             )
+    logger.info("Run completed: %d jobs, %d Telegram messages", len(selected), len(message_ids))
     return {
         "ok": True, "started_at": started.isoformat(), "cv_sync": cv_sync,
         "provider_health": provider_health, "raw_cards": len(tagged_cards),
