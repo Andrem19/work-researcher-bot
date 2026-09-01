@@ -22,6 +22,7 @@ dependencies = [
     "python-docx>=1.1,<2",
     "pypdf>=4,<7",
     "playwright>=1.45,<2",
+    "gdown>=5.2,<6",
 ]
 
 [project.scripts]

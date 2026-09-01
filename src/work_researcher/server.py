@@ -28,7 +28,7 @@ from mcp.server import MCPServer
 from . import dedup
 from . import persistence as db
 from . import tracker as tracker_mod
-from .config import Settings, ensure_dirs, load_settings, set_active_profile
+from .config import Settings, ensure_dirs, load_settings
 from .domain import JobCard, SearchParams
 from .providers import BROWSER_ONLY_NOTES, run_search
 from .ranking import score_job
@@ -36,11 +36,7 @@ from .textutils import job_hash
 
 INSTRUCTIONS = (
     "Work Researcher MCP: UK job search + application engine (29 compact tools). "
-    "CANDIDATE SAFETY: call manage_profiles(action='list') or get_status at the "
-    "start of a task and verify active_profile before searching or applying. Use "
-    "manage_profiles(action='switch', profile='...') when the user selects another "
-    "candidate. Profiles isolate CV folders, application history and browser "
-    "logins; never assume that a job or login from one profile exists in another. "
+    "SINGLE CANDIDATE: this server is configured only for Andrey Remnev. "
     "ADAPTIVE SEARCH RESPONSES: on search_jobs and get_job pass context_window "
     "equal to your model's advertised context size. Local Qwen 3.8 27B MUST pass "
     "context_window=78000 (or response_profile='compact'); models around 100k-256k "
@@ -195,97 +191,9 @@ def create_server(settings: Settings | None = None) -> tuple[MCPServer, Settings
 
 
 def _register_tools(mcp: MCPServer, settings: Settings) -> None:
-    from .browser import close_profile_session, get_session
+    from .browser import get_session
     from .cvmanager import index_cvs as _index_cvs
     from .cvmanager import recommend_cv as _recommend_cv
-
-    profile_lock = asyncio.Lock()
-
-    # ----------------------------------------------------------- profile ----
-    @mcp.tool()
-    async def manage_profiles(
-        action: Literal["list", "switch"] = "list",
-        profile: str | None = None,
-    ) -> dict:
-        """List candidate profiles or switch the active candidate.
-
-        ``switch`` persists [general].active_profile in config.toml and takes
-        effect immediately. It closes the old candidate's browser first, then
-        changes the isolated CV folder, database/application history and
-        browser-login folder. Always list/verify profiles before a
-        search or application task for a named person.
-        """
-        if action == "list":
-            try:
-                fresh = load_settings(settings.config_path, profile=settings.profile_id)
-                catalog = fresh.available_profiles
-            except RuntimeError as exc:
-                return {
-                    "error": f"could not reload profile catalog: {exc}",
-                    "active_profile": settings.profile_id,
-                    "profiles": settings.available_profiles,
-                }
-            return {
-                "active_profile": settings.profile_id,
-                "active_display_name": settings.profile_name,
-                "active_instructions": settings.profile_instructions or None,
-                "profiles": catalog,
-                "selection": {
-                    "manual": "edit [general].active_profile in config.toml",
-                    "agent": "manage_profiles(action='switch', profile='<id>')",
-                    "environment_override": "WORK_RESEARCHER_PROFILE",
-                },
-            }
-        if not profile:
-            return {"error": "profile is required when action='switch'"}
-
-        async with profile_lock:
-            if profile == settings.profile_id:
-                return {
-                    "ok": True,
-                    "changed": False,
-                    "active_profile": settings.profile_id,
-                    "display_name": settings.profile_name,
-                    "instructions": settings.profile_instructions or None,
-                    "note": "profile was already active",
-                }
-            try:
-                replacement = load_settings(settings.config_path, profile=profile)
-            except RuntimeError as exc:
-                return {"error": str(exc), "profiles": settings.available_profiles}
-
-            # A live page may be authenticated as the previous candidate. Close
-            # it before changing any path or identity, even if persistence later
-            # fails, so accounts can never share one application session.
-            await close_profile_session(settings)
-            ensure_dirs(replacement)
-            await db.init_db(replacement.db_path)
-            try:
-                persisted = set_active_profile(settings.config_path, profile)
-            except (OSError, RuntimeError) as exc:
-                return {
-                    "error": f"profile is valid but could not be persisted: {exc}",
-                    "active_profile": settings.profile_id,
-                }
-            settings.activate_from(persisted)
-            configure_logging(settings)
-            async with db.connect(settings.db_path) as conn:
-                await db.ensure_seed_blocklist(conn, settings)
-                await conn.commit()
-            return {
-                "ok": True,
-                "changed": True,
-                "active_profile": settings.profile_id,
-                "display_name": settings.profile_name,
-                "instructions": settings.profile_instructions or None,
-                "cv_dir": str(settings.cv_dir),
-                "database": str(settings.db_path),
-                "browser_profile": str(settings.browser_profile_dir),
-                "note": (
-                    "old browser closed; new profile is active now and persisted in config.toml; "
-                    "WORK_RESEARCHER_PROFILE, if set, still overrides startup selection"
-                ),
-            }
 
     # ------------------------------------------------------------ search ----
     @mcp.tool()
@@ -318,11 +226,8 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         except ImportError:
             pw = "MISSING"
         return {
-            "active_profile": {
-                "id": settings.profile_id,
-                "display_name": settings.profile_name,
-                "instructions": settings.profile_instructions or None,
-                "available": list(settings.available_profiles),
+            "candidate": {
+                "display_name": settings.candidate_name,
                 "cv_dir": str(settings.cv_dir),
                 "data_dir": str(settings.data_dir),
             },
@@ -590,10 +495,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                 b["apply_method"] = method
                 briefs.append(b)
             out = {
-                "active_profile": {
-                    "id": settings.profile_id,
-                    "display_name": settings.profile_name,
-                },
+                "candidate": settings.candidate_name,
                 "search_id": search_id, "total": total,
                 "showing": f"{offset + 1}-{offset + len(rows)} of {total}",
                 "next_offset": offset + limit if offset + limit < total else None,
@@ -1026,7 +928,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                     return {"error": f"unknown job_id {job_id}"}
                 recs = await _recommend_cv(conn, job, limit=5)
             return {
-                "active_profile": settings.profile_id,
+                "candidate": settings.candidate_name,
                 "cv_dir": str(settings.cv_dir),
                 "cvs": cvs,
                 "recommendations_for_job": recs or None,
@@ -1039,7 +941,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         Unchanged files are skipped unless force=true. There is no cloud sync."""
         result = await _index_cvs(settings, force=force)
         return {
-            "active_profile": settings.profile_id,
+            "candidate": settings.candidate_name,
             "cv_dir": str(settings.cv_dir),
             "storage": "local_manual",
             **result,
@@ -1057,11 +959,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         async with db.connect(settings.db_path) as conn:
             result = await tracker_mod.start_application(conn, settings, job_id, cv_id, notes)
             await conn.commit()
-        result["active_profile"] = {
-            "id": settings.profile_id,
-            "display_name": settings.profile_name,
-            "instructions": settings.profile_instructions or None,
-        }
+        result["candidate"] = settings.candidate_name
         return result
 
     @mcp.tool()

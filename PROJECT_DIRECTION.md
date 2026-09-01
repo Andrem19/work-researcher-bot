@@ -1,19 +1,19 @@
-# Project direction
+# Product direction
 
-This repository is an independent development base derived from
-`Andrem19/work-researcher-mcp`.
+The project is now a single-candidate, server-operated vacancy discovery agent
+derived from `Andrem19/work-researcher-mcp`.
 
-The inherited MCP search, ranking, candidate-profile, local-CV and application
-tracking behavior is the working baseline. No bot-specific runtime has been
-implemented during project bootstrap.
+Current product boundary:
 
-Planned later, in separate changes:
+- one candidate: Andrey Remnev;
+- four Job Plan entry routes;
+- fresh public-Drive CV snapshot before every run;
+- UK entry-level discovery with strict agency, seniority and location rules;
+- GLM-5.3-Flash assessment;
+- detailed ranked Telegram delivery at 22:00 UK time;
+- local development, GitHub main branch and GitHub Actions deployment;
+- application submission retained as a separate local MCP capability.
 
-- run continuously on a server;
-- execute vacancy checks on a daily schedule;
-- select and summarize newly discovered vacancies;
-- send results and operational notifications to Telegram;
-- define deployment, secrets and failure-recovery behavior.
-
-Until those decisions are implemented, use and test this repository exactly as
-the original MCP baseline described in `README.md` and `SETUP.md`.
+Future career-level changes should be configuration changes, not new candidate
+profiles. When the candidate moves beyond entry level, update `career_level`,
+queries and scoring rules while preserving report-delivery history.

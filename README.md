@@ -1,169 +1,89 @@
 # Work Researcher Bot
 
-> Foundation repository created from Work Researcher MCP. The current code is
-> the stable MCP baseline; scheduled server execution and Telegram delivery are
-> planned but intentionally not implemented yet. See `PROJECT_DIRECTION.md`.
+Серверный агент поиска работы для одного кандидата — Andrey Remnev. Каждый
+вечер в 22:00 по времени United Kingdom он обновляет четыре профильных CV из
+публичной папки Google Drive, ищет entry-level вакансии, фильтрует агентства и
+неподходящую географию, оценивает вакансии через `glm-5.3-flash` и отправляет
+ранжированный HTML-отчёт в Telegram.
 
-A local [Model Context Protocol](https://modelcontextprotocol.io/) foundation for
-**UK job search, CV management and end-to-end job applications**. Built for
-agent workflows: ask "find junior Data Analyst vacancies near me", the agent
-searches multiple job boards in parallel, deduplicates and ranks the results,
-checks them against your CVs — then submits real applications through an
-embedded browser with persistent logins.
+## Четыре карьерные линии
 
-## What it does
+1. Data Engineering
+2. Geospatial Data Engineering
+3. Analytics → Data Engineering
+4. Software Engineering → Data Platform
 
+Ищутся junior, trainee, graduate, associate и Level 1 роли без требования
+значительного подтверждённого опыта. AI/MLOps остаётся последующей надстройкой,
+а не отдельной пятой линией.
+
+## Политика отбора
+
+- только прямые работодатели; агентства и recruitment consultancies исключаются;
+- remote — вся Великобритания;
+- on-site — Blackpool, Preston и ближайшие населённые пункты;
+- hybrid — расширенная зона до Manchester и сопоставимых городов;
+- senior/lead/manager роли, требования 3+ лет и платные training/course ads
+  исключаются;
+- GLM проверяет обязательные и желательные требования, специальные условия,
+  соответствие выбранному CV и формирует русское резюме;
+- уже доставленные вакансии хранятся в SQLite и повторно не отправляются.
+
+## Runtime
+
+```text
+22:00 Europe/London
+  -> public Google Drive: download + validate exactly four non-geology CVs
+  -> configured job providers: parallel collection + description enrichment
+  -> deterministic entry/location/agency filters
+  -> GLM-5.3-Flash structured assessment and ranking
+  -> Telegram HTML header + one detailed vacancy card per message
+  -> delivery state saved only after Telegram succeeds
 ```
-you: "find trainee/junior jobs within 25 miles, or remote"
-      │
-      ▼
-search_jobs ──► Totaljobs, Reed, Adzuna, Earthworks (HTTP/API)
-      │         + Indeed/CV-Library/GOV.UK via the agent's browser
-      ▼
-dedup + rank + filter:
-  ✂ cross-board duplicates merged
-  ✂ paid training/course ads excluded
-  ✂ out-of-commute on-site jobs dropped (work-mode aware)
-  ✂ hard-requirement gaps flagged against your CVs
-  ✂ blocked agencies/agencies hidden
-      │
-      ▼
-you pick ──► start_application ──► browser fills the real form
-             (CV upload, cover letter, screening questions, wizards)
-      │
-      ▼
-record_application ──► SQLite memory: never apply to the same job twice
-```
 
-## Features
+Telegram-карточка содержит ссылку, работодателя, карьерную линию, score,
+локацию, формат работы, зарплату, обязательные/desirable требования, особые
+условия, сильные стороны и пробелы CV.
 
-- **Multi-board search** — Totaljobs, Reed, Earthworks over plain HTTP;
-  Adzuna and Jooble via free API keys; browser-only boards (Indeed,
-  CV-Library, LinkedIn, GOV.UK Work Hub) feed into the same store through
-  `submit_job_observations`.
-- **Cross-board deduplication** — the same vacancy posted on several boards
-  merges into one canonical job (exact hash + fuzzy title/company matching).
-- **Paid-training-ad guard** — course marketing dressed up as "trainee"
-  jobs (fee language, known course-mill providers, bait salary ranges) is
-  excluded automatically; real paid apprenticeships stay.
-- **Location intelligence** — home base + work-mode-aware commute limits
-  (daily office ≤ configurable miles; hybrid/field ≤ a larger radius;
-  remote = UK-wide). Distances via postcodes.io with caching.
-- **Requirements matching** — hard requirements (qualifications, licences,
-  experience years) parsed from descriptions and checked against your CV
-  text; jobs with unmet hard requirements are flagged or dropped.
-- **Agency vs employer** — every listing is tagged `posted_by: agency |
-  employer` so you always see who is hiring.
-- **Application memory** — SQLite-backed history; searches mark
-  `already_applied`; `start_application` refuses duplicates; `check_applied`
-  matches by URL or fuzzy title+company across boards.
-- **Local CV management** — every candidate has a clearly reported local CV
-  folder. Copy files there manually; `sync_cvs` parses, tags and indexes them.
-- **Agent-optimized browser** — persistent login profile (real Edge by
-  default), Google SSO walkthrough, every action returns a fresh snapshot,
-  application forms with human-readable field labels, apply-wizard isolation
-  (`browser_snapshot(modal_only=true)`), direct file setting on hidden
-  inputs, cover-letter generation above board file-size minimums.
-- **Adaptive response sizing** — tools accept the calling model's
-  `context_window` (or an explicit `response_profile`), so a small local
-  model gets compact resumable pages while a large model can take wider
-  pages. Full result sets always live in SQLite.
-- **Isolated candidate profiles** — switch between people without mixing CVs,
-  application history or persistent browser logins. The
-  original single-account folders remain the default and require no migration.
-
-## Tool surface (grouped, ~30 tools)
-
-| Group | Tools |
-|---|---|
-| profile | `manage_profiles` (list/switch candidate; live and persistent) |
-| search | `get_status`, `search_jobs`, `get_job`, `list_stored_jobs`, `fetch_job_description`, `submit_job_observations` |
-| cv | `list_cvs`, `sync_cvs` (local files only) |
-| apply | `start_application`, `record_application`, `list_applications`, `check_applied`, `manage_blocklist`, `make_cover_letter` |
-| browser | `browser_login`, `browser_open`, `browser_snapshot`, `browser_form`, `browser_click`, `browser_set`, `browser_type`, `browser_upload`, `browser_press`, `browser_wait`, `browser_screenshot`, `browser_eval`, `browser_tabs`, `browser_close` |
-
-## Quick start
+## Локальные команды
 
 ```bash
-uv sync
-uv run playwright install chromium      # bundled fallback (Edge used if present)
-uv run work-researcher doctor           # config / DB / provider report
-uv run work-researcher selftest         # in-process smoke test
-uv run work-researcher serve --transport stdio
+uv sync --extra dev
+uv run work-researcher doctor
+uv run work-researcher sync-drive
+uv run work-researcher run-once --dry-run
+uv run pytest -q
 ```
 
-1. Copy `config.example.toml` → `config.toml` and fill in your profile:
-   name, location, commute preferences, optional wizard answers
-   (right-to-work, date of birth, etc. — boards ask these on apply).
-2. Free API keys (optional but recommended): Adzuna, Reed, Jooble —
-   see `SETUP.md`.
-3. Copy each candidate's CV files into the folder shown by
-   `work-researcher profiles`, then run `work-researcher index-cvs`.
-4. Connect to your MCP host with the stdio command:
+Скопируйте `config.example.toml` в `config.toml`. Секреты задаются только через
+переменные окружения: `ZAI_API_KEY`, `TELEGRAM_BOT_TOKEN`,
+`TELEGRAM_CHAT_ID` и необязательные API-ключи job boards.
 
-```
-uv run --directory /path/to/work-researcher-mcp work-researcher serve --transport stdio
-```
+## Доставка
 
-Board coverage and tiers: `JOB_SITES.md`. Full setup guide: `SETUP.md`.
+Push в `main` запускает `.github/workflows/deploy.yml`: тесты, сборку release,
+SSH-загрузку на сервер и атомарное переключение `/opt/work-researcher-bot/current`.
+Systemd timer использует `Europe/London`, поэтому BST/GMT учитываются
+автоматически. Подробности — в `SETUP.md`.
 
-## Intended agent workflow
+## Отделённый application-контур
 
-1. `search_jobs(query="…", context_window=<your model's context>)` — or a
-   saved `profile` from config.
-2. Present the ranked list to the user (dedup merged, `posted_by`,
-   `location_status`, `requirements_status`, short descriptions).
-3. User picks vacancies.
-4. `start_application(job_id)` per pick → apply plan: URL, method, site
-   playbook, best-matching CV, applicant profile, cautions.
-5. `browser_login(url)` if the board needs auth (one-time; the profile
-   persists).
-6. Complete the form: `browser_form` / `browser_snapshot(modal_only=true)` +
-   `browser_set` + `browser_upload` (cover letters via `make_cover_letter`).
-7. `browser_screenshot` the confirmation →
-   `record_application(status="submitted", evidence={…})`.
+Унаследованные MCP-инструменты для браузера и подачи заявок сохранены в
+`server.py`, но nightly-сервис их не импортирует и не запускает. Их можно
+использовать вручную/локально через `work-researcher serve`; автоматическая
+подача заявок на сервере не входит в этот runtime.
 
-## Configuration
+## Основные компоненты
 
-All settings live in `config.toml` (annotated template in
-`config.example.toml`). `[general].active_profile` selects the startup
-candidate. `manage_profiles(action="list")` shows available profiles and
-`manage_profiles(action="switch", profile="partner")` changes the candidate
-immediately and persists the choice. The equivalent CLI commands are
-`work-researcher profiles` and `work-researcher use-profile partner`.
-
-The existing account uses `inherit_legacy=true`, so its traditional top-level
-applicant/auth settings and its `CV_collection/` + `data/` folders remain
-untouched. New profiles omit `inherit_legacy`; by default they use
-`profiles/<id>/CV_collection`, `profiles/<id>/data`, a separate SQLite history,
-a separate CV index, and a separate persistent browser login directory.
-Shared search/provider/browser defaults remain top-level. Secrets can also come
-from environment variables.
-
-Each profile may define nested `[profiles.<id>.applicant]`, `.auth`,
-`.search`, `.browser`, `.providers`, and `.blocklist` tables plus a free-form
-`instructions` string. Profile IDs are limited to letters, numbers, `_` and
-`-`; use `display_name` for a human-readable name.
-
-For simultaneous independent tasks, pin each MCP process explicitly with
-`work-researcher serve --profile <id>` (or `WORK_RESEARCHER_PROFILE=<id>`).
-This avoids dependence on the globally persisted default while still using the
-same isolated per-profile folders.
-
-## Architecture
-
-```
-src/work_researcher/
-  server.py        MCP wiring + tools            browser.py    Playwright session (persistent profile)
-  providers/       totaljobs reed adzuna jooble  tracker.py    apply plans + per-site playbooks
-                   earthworks govuk_workhub       dedup.py      cross-board duplicate merge
-  persistence.py   SQLite (jobs/searches/apps/    geo.py        geocoding + work-mode commute policy
-                   cvs/blocklist/locations)       cvmanager.py  CV parse + domain tagging + matching
-  requirements.py  hard-requirements matching    ranking.py     relevance scoring
-  training.py      paid-course-ad detection
-  seller.py        agency vs employer             config.py     config.toml + env
+```text
+src/work_researcher/bot.py       nightly orchestration
+src/work_researcher/drive.py     public Drive CV snapshot
+src/work_researcher/career.py    hard eligibility filters
+src/work_researcher/llm.py       GLM structured assessment
+src/work_researcher/telegram.py  Telegram HTML reports
+src/work_researcher/providers/   vacancy sources
+src/work_researcher/server.py    separate local MCP/application surface
+deploy/                          systemd configuration and activation
 ```
 
-## License
-
-MIT
+License: MIT.

@@ -20,6 +20,10 @@ CV_collection/
 config.toml
 secrets/
 .env
+*.service-account.json
+*service_account*.json
+possible-cocoa-*.json
+deploy_key*
 
 # OS noise
 Thumbs.db

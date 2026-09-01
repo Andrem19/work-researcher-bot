@@ -1,0 +1,23 @@
+[Unit]
+Description=Nightly UK job search and Telegram report
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/work-researcher-bot/current
+EnvironmentFile=/etc/work-researcher-bot/env
+Environment=WORK_RESEARCHER_CONFIG=/etc/work-researcher-bot/config.toml
+RuntimeDirectory=work-researcher-bot
+ExecStart=/usr/bin/flock -n /run/work-researcher-bot/nightly.lock /opt/work-researcher-bot/current/.venv/bin/work-researcher run-once
+TimeoutStartSec=45min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/work-researcher-bot
+
+[Install]
+WantedBy=multi-user.target

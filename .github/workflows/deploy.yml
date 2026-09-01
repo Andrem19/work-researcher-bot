@@ -1,0 +1,52 @@
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.15"
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --frozen --extra dev
+      - run: uv run ruff check src/work_researcher/bot.py src/work_researcher/drive.py src/work_researcher/llm.py src/work_researcher/career.py src/work_researcher/telegram.py src/work_researcher/config.py src/work_researcher/cli.py src/work_researcher/persistence.py tests/test_single_candidate.py
+      - run: uv run pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SERVER_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Package release
+        run: tar --exclude=.git --exclude=.venv --exclude=data --exclude=CV_collection --exclude=secrets -czf "/tmp/work-researcher-${GITHUB_SHA}.tar.gz" .
+      - name: Upload and activate
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          scp "/tmp/work-researcher-${GITHUB_SHA}.tar.gz" "$SERVER_USER@$SERVER_HOST:/tmp/"
+          ssh "$SERVER_USER@$SERVER_HOST" "mkdir -p /opt/work-researcher-bot/releases/$GITHUB_SHA && tar -xzf /tmp/work-researcher-$GITHUB_SHA.tar.gz -C /opt/work-researcher-bot/releases/$GITHUB_SHA && bash /opt/work-researcher-bot/releases/$GITHUB_SHA/deploy/activate-release.sh /opt/work-researcher-bot/releases/$GITHUB_SHA && rm -f /tmp/work-researcher-$GITHUB_SHA.tar.gz"

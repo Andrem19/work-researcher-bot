@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Work Researcher every day at 22:00 UK time
+
+[Timer]
+OnCalendar=*-*-* 22:00:00 Europe/London
+Persistent=true
+AccuracySec=1min
+Unit=work-researcher-bot.service
+
+[Install]
+WantedBy=timers.target

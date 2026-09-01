@@ -1,123 +1,94 @@
-# Setup Guide
+# Setup and operations
 
-Search works out of the box (Totaljobs, Reed HTML, Earthworks — no keys
-needed). The steps below unlock the rest.
+## 1. Configuration
 
-## 1. Applicant profile (2 minutes)
+Copy `config.example.toml` to `config.toml`. The production configuration is
+versioned as `deploy/config.production.toml`; it contains no secrets.
 
-Edit `config.toml` → `[applicant]`: `full_name`, `email`, `phone`, and the
-wizard answers boards ask during applications (`date_of_birth`,
-`nationality`, `right_to_work`, `age_group`, `gender`, `earliest_start_date`
-…). These are injected into every apply plan so screening questions answer
-automatically. Location intelligence (`home_location`, `daily_commute_miles`,
-`occasional_commute_miles`, `willing_to_relocate`, `relocate_areas`) also
-lives here.
-
-### Multiple candidates
-
-The supplied configuration keeps the first candidate in the original layout:
-
-```toml
-[general]
-active_profile = "primary"
-
-[profiles.primary]
-display_name = "Primary candidate"
-inherit_legacy = true
-data_dir = "data"
-cv_dir = "CV_collection"
-```
-
-This is deliberately non-migrating: the current CV index, application history
-and browser logins continue to work as before. Add another person
-with isolated nested settings:
-
-```toml
-[profiles.partner]
-display_name = "Partner"
-instructions = "Search goals and candidate-specific application guidance."
-
-[profiles.partner.applicant]
-full_name = "..."
-email = "..."
-phone = "..."
-home_location = "..."
-
-[profiles.partner.auth]
-google_account = "..."
-auto_google_signin = true
-```
-
-Unless overridden, this creates `profiles/partner/CV_collection/`,
-`profiles/partner/data/work_researcher.db`, and browser logins under
-`profiles/partner/data/browser_profile/`. List or switch candidates with:
+Required environment variables:
 
 ```text
-work-researcher profiles
-work-researcher use-profile partner
+ZAI_API_KEY=...
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
 ```
 
-An MCP agent uses `manage_profiles(action="list")` and
-`manage_profiles(action="switch", profile="partner")`; the latter closes the
-old browser context before changing identity. `WORK_RESEARCHER_PROFILE` is an
-optional per-process override and takes precedence at startup.
-
-For concurrent tasks, start each MCP process with
-`work-researcher serve --profile primary` / `--profile partner` (or set the
-environment override per process). Each process then stays pinned to its own
-candidate even if another task changes the default profile in `config.toml`.
-
-## 2. Free API keys (5 minutes, optional but recommended)
-
-| Provider | Where to get | Where to put |
-|---|---|---|
-| Adzuna | https://developer.adzuna.com (sign up → Application) | `[providers.adzuna]` `app_id`/`app_key` or env `ADZUNA_APP_ID`/`ADZUNA_APP_KEY` |
-| Reed | https://www.reed.co.uk/developers (free partner key) | `[providers.reed]` `api_key` or env `REED_API_KEY` |
-| Jooble | https://jooble.org/api/about (request a key) | `[providers.jooble]` `api_key` or env `JOOBLE_API_KEY` |
-
-Without keys the server still searches Totaljobs + Reed(HTML) + Earthworks
-and tells you which providers are missing credentials in `get_status`.
-
-## 3. Local CV folders
-
-CV storage is deliberately manual. Run `work-researcher profiles` or call
-`manage_profiles(action="list")` to see the exact `cv_dir` for every candidate.
-Copy `.docx`, `.pdf`, or `.doc` files into that directory, then run:
+Optional provider credentials:
 
 ```text
-work-researcher index-cvs
+REED_API_KEY=...
+ADZUNA_APP_ID=...
+ADZUNA_APP_KEY=...
+JOOBLE_API_KEY=...
 ```
 
-An MCP agent uses `sync_cvs()` after you add, replace or remove files. There is
-no Google Drive integration and no CV OAuth token.
+The Google Drive folder is public read-only, so no Google token, OAuth secret,
+service-account JSON or API key is used. `gdown` reads the configured folder
+URL. The sync must find exactly four supported CVs after the `geolog` filename
+filter; otherwise it keeps the last known good CV snapshot and fails visibly.
 
-Default locations:
+## 2. Local verification
 
-- Existing `primary`/`andre` profile: `CV_collection/`
-- New `partner` profile: `profiles/partner/CV_collection/`
-- Any other profile: `profiles/<profile-id>/CV_collection/`
-
-## 4. Board logins for applications
-
-The embedded browser keeps a persistent login profile (`data/browser_profile`,
-real Edge by default). `browser_login(url)` walks "Sign in with Google" and
-picks the pre-approved account from `[auth].google_account` WITHOUT asking;
-on 2FA/captcha it stops and asks you to finish in the visible window. Boards
-without Google SSO (e.g. CV-Library, GOV.UK One Login) need a one-time
-manual sign-in in that window — the profile persists afterwards.
-
-## 5. Verify
-
-```
-uv run work-researcher doctor     # config / DB / providers / local CV folder
-uv run work-researcher selftest   # in-process smoke test
+```bash
+uv sync --extra dev
+uv run work-researcher sync-drive
+uv run work-researcher doctor
+uv run pytest -q
+uv run work-researcher run-once --dry-run
 ```
 
-## Where things live
+`run-once --dry-run` still performs live Drive, providers and GLM calls, but
+does not send Telegram messages or mark jobs as delivered.
 
-- `config.toml` — all settings (see the annotated `config.example.toml`)
-- `data/work_researcher.db` — jobs, searches, applications, CV index, blocklist
-- `CV_collection/` — manually managed CV files for the existing default profile
-- `profiles/<id>/CV_collection/` — manually managed CV files for new profiles
-- `data/browser_profile/` — persistent browser logins
-- `data/screenshots/` — application evidence
+## 3. Server layout
+
+```text
+/opt/work-researcher-bot/releases/<git-sha>  immutable releases
+/opt/work-researcher-bot/current             active release symlink
+/etc/work-researcher-bot/config.toml         production config
+/etc/work-researcher-bot/env                 secrets, root:ubuntu 0640
+/var/lib/work-researcher-bot/                SQLite, CVs and sync staging
+```
+
+The oneshot service is `work-researcher-bot.service`; the timer is
+`work-researcher-bot.timer`. Useful commands:
+
+```bash
+systemctl list-timers work-researcher-bot.timer
+sudo systemctl start work-researcher-bot.service
+journalctl -u work-researcher-bot.service -n 200 --no-pager
+```
+
+Operational exceptions are logged and also sent to Telegram as a bounded alert.
+
+## 4. GitHub Actions CI/CD
+
+Repository secrets:
+
+- `SERVER_HOST`
+- `SERVER_USER`
+- `SERVER_SSH_KEY`
+- `SERVER_KNOWN_HOSTS`
+
+Every push to `main` runs lint and tests, uploads a tarball over SSH, installs
+the locked dependencies, atomically activates it and enables the timer. Five
+most recent releases are retained. No runtime secret is copied through GitHub;
+the server-owned environment file survives deployments.
+
+## 5. ZCode and GLM
+
+ZCode is a desktop Electron client. It may be installed on the server for
+parity, but it is not used as the headless scheduler. The systemd service calls
+the same Z.AI Coding Plan endpoint directly with model `glm-5.3-flash`, which is
+the supported reliable server execution path.
+
+## 6. Applications
+
+The MCP browser/application functionality remains available locally:
+
+```bash
+uv run work-researcher serve --transport stdio
+```
+
+It is deliberately outside `work-researcher-bot.service`; nightly runs search
+and report only, never submit an application.

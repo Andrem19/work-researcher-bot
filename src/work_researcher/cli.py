@@ -1,6 +1,6 @@
 """Command-line interface.
 
-Commands: serve, doctor, search, index-cvs, profiles, use-profile, selftest.
+Commands: run-once, sync-drive, serve, doctor, search, index-cvs, selftest.
 Logs never go to stdout in serve mode (stdout is the MCP protocol stream).
 """
 
@@ -9,8 +9,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import sys
-from pathlib import Path
 
 
 def _print(obj) -> None:
@@ -27,7 +27,7 @@ async def cmd_serve(args) -> int:
     if args.transport != "stdio":
         print(f"Unsupported transport: {args.transport}", file=sys.stderr)
         return 2
-    await run_stdio(load_settings(profile=args.profile))
+    await run_stdio(load_settings())
     return 0
 
 
@@ -39,8 +39,7 @@ async def cmd_doctor(args) -> int:
     ensure_dirs(settings)
     await db.init_db(settings.db_path)
     report: dict = {
-        "active_profile": settings.profile_id,
-        "profile_name": settings.profile_name,
+        "candidate": settings.candidate_name,
         "database": str(settings.db_path),
         "cv_dir": str(settings.cv_dir),
     }
@@ -79,10 +78,10 @@ async def cmd_search(args) -> int:
     settings = load_settings()
     ensure_dirs(settings)
     _, _ = create_server(settings)
-    from .domain import SearchParams
-    from .providers import run_search
     from . import dedup as dedup_mod
     from . import persistence as db
+    from .domain import SearchParams
+    from .providers import run_search
     from .ranking import score_job
 
     params = SearchParams(
@@ -125,6 +124,47 @@ async def cmd_index_cvs(args) -> int:
     settings = load_settings()
     ensure_dirs(settings)
     _print(await index_cvs(settings, force=args.force))
+    return 0
+
+
+async def cmd_sync_drive(args) -> int:
+    from .config import ensure_dirs, load_settings
+    from .drive import sync_cvs_from_drive
+
+    settings = load_settings()
+    ensure_dirs(settings)
+    _print(await sync_cvs_from_drive(settings))
+    return 0
+
+
+async def cmd_run_once(args) -> int:
+    from .bot import run_once
+    from .config import load_settings
+    from .telegram import render_failure, send_messages
+
+    settings = load_settings()
+    try:
+        result = await run_once(
+            settings,
+            deliver=not args.dry_run,
+            include_seen=args.include_seen,
+        )
+    except Exception as exc:
+        if not args.dry_run:
+            try:
+                await send_messages(settings, [render_failure(exc)])
+            except Exception:
+                logging.getLogger("work_researcher.cli").exception(
+                    "could not send Telegram failure alert"
+                )
+        raise
+    if args.dry_run:
+        _print(result)
+    else:
+        _print({k: result[k] for k in (
+            "ok", "started_at", "raw_cards", "deduplicated", "eligible_before_glm",
+            "reported", "message_ids",
+        )})
     return 0
 
 
@@ -203,7 +243,7 @@ async def cmd_selftest(args) -> int:
         from .browser import BrowserSession  # noqa: F401
 
         results["browser_import"] = "ok"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         results["browser_import"] = f"FAIL {exc}"
 
     _print(results)
@@ -215,39 +255,6 @@ async def cmd_selftest(args) -> int:
     return 0
 
 
-async def cmd_profiles(args) -> int:
-    from .config import load_settings
-
-    settings = load_settings()
-    _print({
-        "active_profile": settings.profile_id,
-        "active_display_name": settings.profile_name,
-        "active_instructions": settings.profile_instructions or None,
-        "profiles": settings.available_profiles,
-    })
-    return 0
-
-
-async def cmd_use_profile(args) -> int:
-    from .config import CONFIG_PATH, set_active_profile
-
-    try:
-        settings = set_active_profile(
-            Path(args.config) if args.config else CONFIG_PATH,
-            args.profile,
-        )
-    except (OSError, RuntimeError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    _print({
-        "ok": True,
-        "active_profile": settings.profile_id,
-        "display_name": settings.profile_name,
-        "note": "restart any already-running MCP process; manage_profiles switches it live",
-    })
-    return 0
-
-
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="work-researcher",
                                 description="UK job search & application MCP")
@@ -255,8 +262,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("serve", help="Run the MCP server")
     sp.add_argument("--transport", default="stdio", choices=["stdio"])
-    sp.add_argument("--profile", default=None, help="Candidate profile for this process")
     sp.set_defaults(func=cmd_serve)
+
+    sp = sub.add_parser("run-once", help="Run the complete nightly pipeline now")
+    sp.add_argument("--dry-run", action="store_true", help="Do not send Telegram messages")
+    sp.add_argument("--include-seen", action="store_true", help="Include jobs already stored")
+    sp.set_defaults(func=cmd_run_once)
+
+    sub.add_parser("sync-drive", help="Pull and index the four career CVs") \
+        .set_defaults(func=cmd_sync_drive)
 
     sub.add_parser("doctor", help="Config/DB/provider report").set_defaults(func=cmd_doctor)
 
@@ -273,13 +287,6 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_index_cvs)
 
     sub.add_parser("selftest", help="In-process smoke test").set_defaults(func=cmd_selftest)
-    sub.add_parser("profiles", help="List candidate profiles and the active one") \
-        .set_defaults(func=cmd_profiles)
-
-    sp = sub.add_parser("use-profile", help="Persist the default candidate profile")
-    sp.add_argument("profile")
-    sp.add_argument("--config", default=None, help="Alternative config.toml path")
-    sp.set_defaults(func=cmd_use_profile)
     return p
 
 

@@ -1,7 +1,7 @@
 [general]
 candidate_name = "Andrey Remnev"
-cv_dir = "CV_collection"
-data_dir = "data"
+data_dir = "/var/lib/work-researcher-bot"
+cv_dir = "/var/lib/work-researcher-bot/CV_collection"
 log_level = "INFO"
 
 [search]

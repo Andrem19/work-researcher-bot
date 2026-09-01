@@ -116,6 +116,11 @@ CREATE TABLE IF NOT EXISTS blocklist (
     created_at TEXT NOT NULL,
     PRIMARY KEY (kind, normalized)
 );
+CREATE TABLE IF NOT EXISTS report_deliveries (
+    content_hash TEXT PRIMARY KEY,
+    delivered_at TEXT NOT NULL,
+    telegram_message_ids TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_jobs_posted ON jobs(posted_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_hash ON jobs(content_hash);
 CREATE INDEX IF NOT EXISTS idx_apps_job ON applications(job_id);
@@ -126,7 +131,7 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
-class connect:  # noqa: N801 - async context manager factory
+class connect:
     """`async with connect(db_path) as conn:` — opens WAL, applies the schema,
     commits and closes on exit."""
 
@@ -155,6 +160,28 @@ class connect:  # noqa: N801 - async context manager factory
 async def init_db(db_path: Path) -> None:
     async with connect(db_path):
         pass
+
+
+# ------------------------------------------------------ report delivery ----
+async def delivered_hashes(conn: aiosqlite.Connection) -> set[str]:
+    """Return jobs which reached Telegram in an earlier completed report."""
+    cur = await conn.execute("SELECT content_hash FROM report_deliveries")
+    return {str(row[0]) for row in await cur.fetchall()}
+
+
+async def mark_report_delivered(
+    conn: aiosqlite.Connection,
+    content_hashes: list[str],
+    message_ids: list[int],
+) -> None:
+    if not content_hashes:
+        return
+    payload = json.dumps(message_ids)
+    await conn.executemany(
+        """INSERT OR REPLACE INTO report_deliveries
+           (content_hash, delivered_at, telegram_message_ids) VALUES (?,?,?)""",
+        [(content_hash, now_iso(), payload) for content_hash in content_hashes],
+    )
 
 
 # ---------------------------------------------------------------- jobs ----
@@ -377,7 +404,7 @@ async def sources_for_hashes(conn: aiosqlite.Connection,
         return {}
     marks = ",".join("?" * len(hashes))
     cur = await conn.execute(
-        f"SELECT content_hash, source, source_url FROM job_sources WHERE content_hash IN ({marks})",  # noqa: S608
+        f"SELECT content_hash, source, source_url FROM job_sources WHERE content_hash IN ({marks})",
         hashes,
     )
     out: dict[str, list[dict]] = {}
@@ -647,7 +674,7 @@ def brief_from_row(row: dict, rank: int, is_new: bool, sources: list[str]) -> di
 
 
 async def count_rows(conn: aiosqlite.Connection, table: str) -> int:
-    cur = await conn.execute(f"SELECT COUNT(*) FROM {table}")  # noqa: S608 - fixed table list
+    cur = await conn.execute(f"SELECT COUNT(*) FROM {table}")
     return (await cur.fetchone())[0]
 
 
