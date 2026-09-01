@@ -16,7 +16,7 @@ TimeoutStartSec=45min
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=read-only
 ReadWritePaths=/var/lib/work-researcher-bot
 
 [Install]
