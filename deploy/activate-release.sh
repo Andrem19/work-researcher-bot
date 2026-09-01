@@ -54,4 +54,9 @@ WORK_RESEARCHER_CONFIG=/etc/work-researcher-bot/config.toml "$app_root/current/.
 
 find "$app_root/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
   | sort -nr | tail -n +6 | cut -d' ' -f2- \
-  | while IFS= read -r old_release; do rm -rf -- "$old_release"; done
+  | while IFS= read -r old_release; do
+      case "$old_release" in
+        "$app_root/releases/"*) sudo rm -rf -- "$old_release" ;;
+        *) echo "refusing to remove unexpected release path: $old_release" >&2; exit 1 ;;
+      esac
+    done

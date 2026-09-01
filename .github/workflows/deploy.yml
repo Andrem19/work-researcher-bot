@@ -37,6 +37,7 @@ jobs:
           src/work_researcher/requirements.py
           tests/test_single_candidate.py
           tests/test_market.py
+          tests/test_drive.py
       - run: uv run pytest -q
 
   deploy:
