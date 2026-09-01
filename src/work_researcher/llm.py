@@ -51,11 +51,13 @@ async def assess_batch(settings: Settings, items: list[dict]) -> list[dict]:
         "model": settings.llm.get("model", "glm-5.3-flash"),
         "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
         "temperature": 0.1,
+        "thinking": {"type": "disabled"},
         "response_format": {"type": "json_object"},
     }
     timeout = float(settings.llm.get("timeout_s", 150))
     attempts = max(1, int(settings.llm.get("max_attempts", 3)))
     payload["max_tokens"] = int(settings.llm.get("max_tokens", 4096))
+    last_error: BaseException | None = None
     async with httpx.AsyncClient(timeout=timeout) as client:
         for attempt in range(attempts):
             try:
@@ -66,19 +68,33 @@ async def assess_batch(settings: Settings, items: list[dict]) -> list[dict]:
                 )
                 response.raise_for_status()
                 data = response.json()
-                break
-            except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
+                content = data["choices"][0]["message"].get("content")
+                if not isinstance(content, str) or not content.strip():
+                    finish = data["choices"][0].get("finish_reason", "unknown")
+                    raise ValueError(f"GLM returned empty content (finish_reason={finish})")
+                parsed = _json_payload(content)
+                if isinstance(parsed, dict):
+                    parsed = parsed.get("jobs") or parsed.get("results") or [parsed]
+                if not isinstance(parsed, list):
+                    raise ValueError("GLM response was not a JSON list")
+                return [item for item in parsed if isinstance(item, dict)]
+            except (
+                httpx.TimeoutException,
+                httpx.NetworkError,
+                httpx.RemoteProtocolError,
+                json.JSONDecodeError,
+                KeyError,
+                IndexError,
+                TypeError,
+                ValueError,
+            ) as exc:
+                last_error = exc
                 if attempt + 1 >= attempts:
                     raise
                 await asyncio.sleep(2 ** attempt)
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code not in {429, 500, 502, 503, 504} or attempt + 1 >= attempts:
                     raise
+                last_error = exc
                 await asyncio.sleep(2 ** attempt)
-    content = data["choices"][0]["message"]["content"]
-    parsed = _json_payload(content)
-    if isinstance(parsed, dict):
-        parsed = parsed.get("jobs") or parsed.get("results") or [parsed]
-    if not isinstance(parsed, list):
-        raise RuntimeError("GLM response was not a JSON list")
-    return [x for x in parsed if isinstance(x, dict)]
+    raise RuntimeError("GLM assessment failed after retries") from last_error

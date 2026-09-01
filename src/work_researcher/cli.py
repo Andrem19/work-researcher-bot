@@ -296,6 +296,9 @@ def main() -> None:
         level=os.environ.get("WORK_RESEARCHER_LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # httpx logs full request URLs; Telegram embeds its secret token in the URL.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     parser = build_parser()
     args = parser.parse_args()
     try:
