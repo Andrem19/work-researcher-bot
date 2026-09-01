@@ -1,6 +1,10 @@
-# Work Researcher MCP
+# Work Researcher Bot
 
-A local [Model Context Protocol](https://modelcontextprotocol.io/) server for
+> Foundation repository created from Work Researcher MCP. The current code is
+> the stable MCP baseline; scheduled server execution and Telegram delivery are
+> planned but intentionally not implemented yet. See `PROJECT_DIRECTION.md`.
+
+A local [Model Context Protocol](https://modelcontextprotocol.io/) foundation for
 **UK job search, CV management and end-to-end job applications**. Built for
 agent workflows: ask "find junior Data Analyst vacancies near me", the agent
 searches multiple job boards in parallel, deduplicates and ranks the results,
@@ -53,8 +57,8 @@ record_application ──► SQLite memory: never apply to the same job twice
 - **Application memory** — SQLite-backed history; searches mark
   `already_applied`; `start_application` refuses duplicates; `check_applied`
   matches by URL or fuzzy title+company across boards.
-- **CV management** — local CV folder + two-way Google Drive sync. CVs are
-  parsed, domain-tagged and matched to vacancies; edits flow back to Drive.
+- **Local CV management** — every candidate has a clearly reported local CV
+  folder. Copy files there manually; `sync_cvs` parses, tags and indexes them.
 - **Agent-optimized browser** — persistent login profile (real Edge by
   default), Google SSO walkthrough, every action returns a fresh snapshot,
   application forms with human-readable field labels, apply-wizard isolation
@@ -64,13 +68,17 @@ record_application ──► SQLite memory: never apply to the same job twice
   `context_window` (or an explicit `response_profile`), so a small local
   model gets compact resumable pages while a large model can take wider
   pages. Full result sets always live in SQLite.
+- **Isolated candidate profiles** — switch between people without mixing CVs,
+  application history or persistent browser logins. The
+  original single-account folders remain the default and require no migration.
 
 ## Tool surface (grouped, ~30 tools)
 
 | Group | Tools |
 |---|---|
+| profile | `manage_profiles` (list/switch candidate; live and persistent) |
 | search | `get_status`, `search_jobs`, `get_job`, `list_stored_jobs`, `fetch_job_description`, `submit_job_observations` |
-| cv | `list_cvs`, `sync_cvs`, `push_cv_to_drive` |
+| cv | `list_cvs`, `sync_cvs` (local files only) |
 | apply | `start_application`, `record_application`, `list_applications`, `check_applied`, `manage_blocklist`, `make_cover_letter` |
 | browser | `browser_login`, `browser_open`, `browser_snapshot`, `browser_form`, `browser_click`, `browser_set`, `browser_type`, `browser_upload`, `browser_press`, `browser_wait`, `browser_screenshot`, `browser_eval`, `browser_tabs`, `browser_close` |
 
@@ -89,7 +97,8 @@ uv run work-researcher serve --transport stdio
    (right-to-work, date of birth, etc. — boards ask these on apply).
 2. Free API keys (optional but recommended): Adzuna, Reed, Jooble —
    see `SETUP.md`.
-3. Google Drive CV sync (optional): one-time OAuth setup in `SETUP.md`.
+3. Copy each candidate's CV files into the folder shown by
+   `work-researcher profiles`, then run `work-researcher index-cvs`.
 4. Connect to your MCP host with the stdio command:
 
 ```
@@ -109,7 +118,7 @@ Board coverage and tiers: `JOB_SITES.md`. Full setup guide: `SETUP.md`.
    playbook, best-matching CV, applicant profile, cautions.
 5. `browser_login(url)` if the board needs auth (one-time; the profile
    persists).
-6. Drive the form: `browser_form` / `browser_snapshot(modal_only=true)` +
+6. Complete the form: `browser_form` / `browser_snapshot(modal_only=true)` +
    `browser_set` + `browser_upload` (cover letters via `make_cover_letter`).
 7. `browser_screenshot` the confirmation →
    `record_application(status="submitted", evidence={…})`.
@@ -117,10 +126,29 @@ Board coverage and tiers: `JOB_SITES.md`. Full setup guide: `SETUP.md`.
 ## Configuration
 
 All settings live in `config.toml` (annotated template in
-`config.example.toml`): applicant profile, home location + commute limits,
-search defaults and saved search profiles, board API keys, Google Drive CV
-sync, browser preferences, pre-approved sign-in account, blocklist seeds.
-Secrets can also come from environment variables.
+`config.example.toml`). `[general].active_profile` selects the startup
+candidate. `manage_profiles(action="list")` shows available profiles and
+`manage_profiles(action="switch", profile="partner")` changes the candidate
+immediately and persists the choice. The equivalent CLI commands are
+`work-researcher profiles` and `work-researcher use-profile partner`.
+
+The existing account uses `inherit_legacy=true`, so its traditional top-level
+applicant/auth settings and its `CV_collection/` + `data/` folders remain
+untouched. New profiles omit `inherit_legacy`; by default they use
+`profiles/<id>/CV_collection`, `profiles/<id>/data`, a separate SQLite history,
+a separate CV index, and a separate persistent browser login directory.
+Shared search/provider/browser defaults remain top-level. Secrets can also come
+from environment variables.
+
+Each profile may define nested `[profiles.<id>.applicant]`, `.auth`,
+`.search`, `.browser`, `.providers`, and `.blocklist` tables plus a free-form
+`instructions` string. Profile IDs are limited to letters, numbers, `_` and
+`-`; use `display_name` for a human-readable name.
+
+For simultaneous independent tasks, pin each MCP process explicitly with
+`work-researcher serve --profile <id>` (or `WORK_RESEARCHER_PROFILE=<id>`).
+This avoids dependence on the globally persisted default while still using the
+same isolated per-profile folders.
 
 ## Architecture
 
@@ -131,8 +159,8 @@ src/work_researcher/
                    earthworks govuk_workhub       dedup.py      cross-board duplicate merge
   persistence.py   SQLite (jobs/searches/apps/    geo.py        geocoding + work-mode commute policy
                    cvs/blocklist/locations)       cvmanager.py  CV parse + domain tagging + matching
-  drive.py         Google Drive read/write        requirements.py  hard-requirements extraction/matching
-  ranking.py       relevance scoring              training.py   paid-course-ad detection
+  requirements.py  hard-requirements matching    ranking.py     relevance scoring
+  training.py      paid-course-ad detection
   seller.py        agency vs employer             config.py     config.toml + env
 ```
 

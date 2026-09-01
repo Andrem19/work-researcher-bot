@@ -85,8 +85,6 @@ CREATE TABLE IF NOT EXISTS cvs (
     sha256 TEXT,
     size INTEGER,
     mtime TEXT,
-    drive_file_id TEXT,
-    drive_modified TEXT,
     text_preview TEXT,
     full_text TEXT,
     tags TEXT,
@@ -476,27 +474,28 @@ async def application_for_job(conn: aiosqlite.Connection, job_id: str) -> dict |
 async def upsert_cv(conn: aiosqlite.Connection, rec: dict) -> str:
     cv_id = rec.get("id") or new_id("cv")
     await conn.execute(
-        """INSERT INTO cvs (id, filename, path, sha256, size, mtime, drive_file_id,
-                            drive_modified, text_preview, full_text, tags, language,
+        """INSERT INTO cvs (id, filename, path, sha256, size, mtime,
+                            text_preview, full_text, tags, language,
                             name_guess, indexed_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(path) DO UPDATE SET
                filename=excluded.filename, sha256=excluded.sha256, size=excluded.size,
-               mtime=excluded.mtime, drive_file_id=COALESCE(excluded.drive_file_id, drive_file_id),
-               drive_modified=COALESCE(excluded.drive_modified, drive_modified),
+               mtime=excluded.mtime,
                text_preview=excluded.text_preview, full_text=excluded.full_text,
                tags=excluded.tags, language=excluded.language,
                name_guess=excluded.name_guess, indexed_at=excluded.indexed_at""",
         (cv_id, rec["filename"], rec["path"], rec.get("sha256"), rec.get("size"),
-         rec.get("mtime"), rec.get("drive_file_id"), rec.get("drive_modified"),
-         rec.get("text_preview"), rec.get("full_text"), rec.get("tags"),
-         rec.get("language"), rec.get("name_guess"), now_iso()),
+         rec.get("mtime"), rec.get("text_preview"), rec.get("full_text"),
+         rec.get("tags"), rec.get("language"), rec.get("name_guess"), now_iso()),
     )
     return cv_id
 
 
 async def list_cvs(conn: aiosqlite.Connection) -> list[dict]:
-    cur = await conn.execute("SELECT * FROM cvs ORDER BY filename")
+    cur = await conn.execute(
+        "SELECT id, filename, path, sha256, size, mtime, text_preview, tags, "
+        "language, name_guess, indexed_at FROM cvs ORDER BY filename"
+    )
     rows = []
     for r in await cur.fetchall():
         d = dict(r)

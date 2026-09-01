@@ -4,7 +4,7 @@ Tool surface is deliberately COMPACT (24 tools, prefix-grouped) so mid-size
 agents can hold it in mind:
 
   search     get_status, search_jobs, get_job, submit_job_observations
-  cv         list_cvs, sync_cvs, push_cv_to_drive
+  cv         list_cvs, sync_cvs
   apply      start_application, record_application, list_applications,
              check_applied
   browser    browser_open, browser_snapshot, browser_form, browser_click,
@@ -25,17 +25,22 @@ from typing import Any, Literal
 
 from mcp.server import MCPServer
 
-from . import dedup, drive as drive_mod
+from . import dedup
 from . import persistence as db
 from . import tracker as tracker_mod
-from .config import Settings, ensure_dirs, load_settings
+from .config import Settings, ensure_dirs, load_settings, set_active_profile
 from .domain import JobCard, SearchParams
 from .providers import BROWSER_ONLY_NOTES, run_search
 from .ranking import score_job
 from .textutils import job_hash
 
 INSTRUCTIONS = (
-    "Work Researcher MCP: UK job search + application engine (28 compact tools). "
+    "Work Researcher MCP: UK job search + application engine (29 compact tools). "
+    "CANDIDATE SAFETY: call manage_profiles(action='list') or get_status at the "
+    "start of a task and verify active_profile before searching or applying. Use "
+    "manage_profiles(action='switch', profile='...') when the user selects another "
+    "candidate. Profiles isolate CV folders, application history and browser "
+    "logins; never assume that a job or login from one profile exists in another. "
     "ADAPTIVE SEARCH RESPONSES: on search_jobs and get_job pass context_window "
     "equal to your model's advertised context size. Local Qwen 3.8 27B MUST pass "
     "context_window=78000 (or response_profile='compact'); models around 100k-256k "
@@ -60,7 +65,7 @@ INSTRUCTIONS = (
     "[auth] WITHOUT asking the user (2FA/captcha → stop and ask); (6) drive the "
     "submission with browser_* tools; (7) record_application(status='submitted', "
     "evidence={screenshot}). LOCATION INTELLIGENCE: results carry work_mode / "
-    "distance_miles / location_status (home=Blackpool per config). Remote jobs "
+    "distance_miles / location_status (home comes from the active profile). Remote jobs "
     "are searched UK-wide; on-site jobs outside max_commute_miles "
     "are flagged mismatch — never submit those without explicit user approval. "
     "LOCATION IS WORK-MODE-AWARE: on_site (daily office) must be within "
@@ -190,15 +195,103 @@ def create_server(settings: Settings | None = None) -> tuple[MCPServer, Settings
 
 
 def _register_tools(mcp: MCPServer, settings: Settings) -> None:
-    from .browser import BrowserError, get_session
+    from .browser import close_profile_session, get_session
     from .cvmanager import index_cvs as _index_cvs
     from .cvmanager import recommend_cv as _recommend_cv
+
+    profile_lock = asyncio.Lock()
+
+    # ----------------------------------------------------------- profile ----
+    @mcp.tool()
+    async def manage_profiles(
+        action: Literal["list", "switch"] = "list",
+        profile: str | None = None,
+    ) -> dict:
+        """List candidate profiles or switch the active candidate.
+
+        ``switch`` persists [general].active_profile in config.toml and takes
+        effect immediately. It closes the old candidate's browser first, then
+        changes the isolated CV folder, database/application history and
+        browser-login folder. Always list/verify profiles before a
+        search or application task for a named person.
+        """
+        if action == "list":
+            try:
+                fresh = load_settings(settings.config_path, profile=settings.profile_id)
+                catalog = fresh.available_profiles
+            except RuntimeError as exc:
+                return {
+                    "error": f"could not reload profile catalog: {exc}",
+                    "active_profile": settings.profile_id,
+                    "profiles": settings.available_profiles,
+                }
+            return {
+                "active_profile": settings.profile_id,
+                "active_display_name": settings.profile_name,
+                "active_instructions": settings.profile_instructions or None,
+                "profiles": catalog,
+                "selection": {
+                    "manual": "edit [general].active_profile in config.toml",
+                    "agent": "manage_profiles(action='switch', profile='<id>')",
+                    "environment_override": "WORK_RESEARCHER_PROFILE",
+                },
+            }
+        if not profile:
+            return {"error": "profile is required when action='switch'"}
+
+        async with profile_lock:
+            if profile == settings.profile_id:
+                return {
+                    "ok": True,
+                    "changed": False,
+                    "active_profile": settings.profile_id,
+                    "display_name": settings.profile_name,
+                    "instructions": settings.profile_instructions or None,
+                    "note": "profile was already active",
+                }
+            try:
+                replacement = load_settings(settings.config_path, profile=profile)
+            except RuntimeError as exc:
+                return {"error": str(exc), "profiles": settings.available_profiles}
+
+            # A live page may be authenticated as the previous candidate. Close
+            # it before changing any path or identity, even if persistence later
+            # fails, so accounts can never share one application session.
+            await close_profile_session(settings)
+            ensure_dirs(replacement)
+            await db.init_db(replacement.db_path)
+            try:
+                persisted = set_active_profile(settings.config_path, profile)
+            except (OSError, RuntimeError) as exc:
+                return {
+                    "error": f"profile is valid but could not be persisted: {exc}",
+                    "active_profile": settings.profile_id,
+                }
+            settings.activate_from(persisted)
+            configure_logging(settings)
+            async with db.connect(settings.db_path) as conn:
+                await db.ensure_seed_blocklist(conn, settings)
+                await conn.commit()
+            return {
+                "ok": True,
+                "changed": True,
+                "active_profile": settings.profile_id,
+                "display_name": settings.profile_name,
+                "instructions": settings.profile_instructions or None,
+                "cv_dir": str(settings.cv_dir),
+                "database": str(settings.db_path),
+                "browser_profile": str(settings.browser_profile_dir),
+                "note": (
+                    "old browser closed; new profile is active now and persisted in config.toml; "
+                    "WORK_RESEARCHER_PROFILE, if set, still overrides startup selection"
+                ),
+            }
 
     # ------------------------------------------------------------ search ----
     @mcp.tool()
     async def get_status() -> dict:
-        """Health/config snapshot: DB stats, providers, API keys, Google Drive,
-        CV index, saved search profiles. Call first in a new session."""
+        """Health/config snapshot: active candidate, local CV directory, DB
+        stats, providers, API keys and saved searches. Call first in a session."""
         async with db.connect(settings.db_path) as conn:
             jobs = await db.count_rows(conn, "jobs")
             apps = await db.count_rows(conn, "applications")
@@ -225,11 +318,24 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         except ImportError:
             pw = "MISSING"
         return {
+            "active_profile": {
+                "id": settings.profile_id,
+                "display_name": settings.profile_name,
+                "instructions": settings.profile_instructions or None,
+                "available": list(settings.available_profiles),
+                "cv_dir": str(settings.cv_dir),
+                "data_dir": str(settings.data_dir),
+            },
             "database": {"jobs": jobs, "applications": apps, "cvs": cvs,
                          "searches": searches, "path": str(settings.db_path)},
             "providers": providers,
             "browser_only_sources": BROWSER_ONLY_NOTES,
-            "drive": await drive_mod.status(settings),
+            "cv_storage": {
+                "mode": "local_manual",
+                "directory": str(settings.cv_dir),
+                "instruction": "Copy CV files here, then call sync_cvs to index them",
+                "extensions": [".docx", ".pdf", ".doc"],
+            },
             "playwright": pw,
             "browser_profile": str(settings.browser_profile_dir),
             "search_profiles": {k: v.get("query")
@@ -484,6 +590,10 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                 b["apply_method"] = method
                 briefs.append(b)
             out = {
+                "active_profile": {
+                    "id": settings.profile_id,
+                    "display_name": settings.profile_name,
+                },
                 "search_id": search_id, "total": total,
                 "showing": f"{offset + 1}-{offset + len(rows)} of {total}",
                 "next_offset": offset + limit if offset + limit < total else None,
@@ -521,9 +631,11 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                                         "(pass include_training=true to see them)")
             if location_skipped:
                 out["location_skipped"] = location_skipped
-                out["note_location"] = ("on-site jobs beyond the commute limit "
-                                        "were dropped (work-mode-aware: daily ≤25mi, "
-                                        "hybrid/field ≤50mi, remote unlimited)")
+                out["note_location"] = (
+                    "on-site jobs beyond the active profile's commute limit were dropped "
+                    f"(work-mode-aware: daily ≤{settings.daily_commute_miles}mi, "
+                    f"hybrid/field ≤{settings.occasional_commute_miles}mi, remote unlimited)"
+                )
             return out
 
     @mcp.tool()
@@ -559,7 +671,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         balanced (12). All remaining results stay stored. Results are ranked,
         cross-board duplicates merged (sources[]), with memory flags
         (already_applied, application_status) and location intelligence
-        (work_mode, distance_miles from Blackpool, location_status
+        (work_mode, distance_miles from the active profile's home, location_status
         ok|mismatch|caution|unknown). PAID TRAINING/COURSE ADS (where you pay
         them, e.g. Netcom-style 'trainee' course marketing) are excluded
         automatically — training_offers_skipped shows how many; set
@@ -903,7 +1015,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
     # ----------------------------------------------------------------- cv ----
     @mcp.tool()
     async def list_cvs(job_id: str | None = None) -> dict:
-        """Indexed CVs (tags: data_analytics/geology/…, previews, drive link).
+        """CVs indexed from the active profile's local folder.
         Pass job_id to get per-CV recommendation scores for that job."""
         async with db.connect(settings.db_path) as conn:
             cvs = await db.list_cvs(conn)
@@ -913,28 +1025,25 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
                 if not job:
                     return {"error": f"unknown job_id {job_id}"}
                 recs = await _recommend_cv(conn, job, limit=5)
-            return {"cvs": cvs, "recommendations_for_job": recs or None}
+            return {
+                "active_profile": settings.profile_id,
+                "cv_dir": str(settings.cv_dir),
+                "cvs": cvs,
+                "recommendations_for_job": recs or None,
+                "note": "Copy CV files into cv_dir manually; call sync_cvs after changes",
+            }
 
     @mcp.tool()
-    async def sync_cvs(source: str = "both", force: bool = False) -> dict:
-        """Refresh the CV index. source: 'local' (scan CV_collection),
-        'drive' (pull new/changed files from Google Drive folder 'CV' on
-        ry4ara@gmail.com, then index), 'both' (default). Drive needs one-time
-        credentials (see SETUP.md) — returns setup_needed otherwise."""
-        results: dict[str, Any] = {}
-        if source in ("drive", "both"):
-            results["drive"] = await drive_mod.sync(settings)
-        if source in ("local", "both"):
-            results["index"] = await _index_cvs(settings, force=force)
-        return results
-
-    @mcp.tool()
-    async def push_cv_to_drive(path: str, force: bool = False) -> dict:
-        """Push a locally edited CV back to Google Drive (update known file or
-        create in the CV folder). Edit loop: edit docx in CV_collection →
-        sync_cvs(source='local') → push_cv_to_drive. Refuses to overwrite when
-        the Drive copy changed after our last pull (force to override)."""
-        return await drive_mod.upload_cv(settings, path, force=force)
+    async def sync_cvs(force: bool = False) -> dict:
+        """Index CV files manually copied into the active profile's cv_dir.
+        Unchanged files are skipped unless force=true. There is no cloud sync."""
+        result = await _index_cvs(settings, force=force)
+        return {
+            "active_profile": settings.profile_id,
+            "cv_dir": str(settings.cv_dir),
+            "storage": "local_manual",
+            **result,
+        }
 
     # ------------------------------------------------------------- apply ----
     @mcp.tool()
@@ -948,6 +1057,11 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
         async with db.connect(settings.db_path) as conn:
             result = await tracker_mod.start_application(conn, settings, job_id, cv_id, notes)
             await conn.commit()
+        result["active_profile"] = {
+            "id": settings.profile_id,
+            "display_name": settings.profile_name,
+            "instructions": settings.profile_instructions or None,
+        }
         return result
 
     @mcp.tool()
@@ -1049,7 +1163,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
     async def browser_login(url: str) -> dict:
         """Ensure we're signed in on a job board before applying. Opens the
         site; if signed out, walks 'Continue with Google' and picks the
-        pre-approved account (config [auth].google_account — the user allows
+        pre-approved account (active profile auth.google_account — the user allows
         this WITHOUT asking). Returns logged_in; needs_user=true on 2FA/
         captcha/consent — then stop and ask the user to finish in the window."""
         account = settings.auth.get("google_account") \
