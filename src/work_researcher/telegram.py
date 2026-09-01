@@ -19,7 +19,14 @@ def _value(value) -> str:
     return html.escape(str(value))
 
 
-def render_report(jobs: list[dict], provider_health: list[dict], cv_sync: dict, run_time: datetime) -> list[str]:
+def render_report(
+    jobs: list[dict],
+    provider_health: list[dict],
+    cv_sync: dict,
+    run_time: datetime,
+    *,
+    detailed_jobs: int = 5,
+) -> list[str]:
     ok_sources = [x["provider"] for x in provider_health if x.get("ok")]
     warnings = [
         f"{x['provider']}: {x.get('error', 'error')}"
@@ -27,10 +34,15 @@ def render_report(jobs: list[dict], provider_health: list[dict], cv_sync: dict, 
     ]
     header = (
         f"<b>Вечерний поиск вакансий — {run_time:%d.%m.%Y}</b>\n"
-        f"Новых вакансий после жёстких фильтров: <b>{len(jobs)}</b>\n"
+        f"Показано лучших вакансий после жёстких фильтров: <b>{len(jobs)}</b>\n"
         f"CV обновлены из Drive: <b>{len(cv_sync.get('files', []))}</b>\n"
         f"Источники: {_value(ok_sources)}"
     )
+    if len(jobs) > detailed_jobs:
+        header += (
+            f"\nФормат: первые <b>{detailed_jobs}</b> подробно, "  # noqa: RUF001
+            f"следующие <b>{len(jobs) - detailed_jobs}</b> кратко"
+        )
     if warnings:
         header += f"\n⚠️ Ограничения источников: {_value(warnings)}"
     messages = [header]
@@ -44,23 +56,34 @@ def render_report(jobs: list[dict], provider_health: list[dict], cv_sync: dict, 
             "review": "🟡 Прошла фильтры — стоит рассмотреть",
             "fallback": "🟠 Прошла фильтры — решение оставлено вам",
         }.get(job.get("review_tier"), "🟡 Прошла фильтры — стоит рассмотреть")
-        block = (
+        common = (
             f"<b>{index}. {title_line}</b>\n"
             f"<b>{tier}</b>\n"
-            f"🏢 <b>Работодатель:</b> {_value(job.get('company'))} — прямой ({_value(job.get('direct_employer_reason'))})\n"
+            f"🏢 <b>Работодатель:</b> {_value(job.get('company'))}\n"
             f"🧭 <b>Линия:</b> {_value(job.get('path_label'))} | <b>Score:</b> {_value(job.get('overall_score'))}/100\n"
             f"📍 <b>Место:</b> {_value(job.get('location_text'))} | <b>Формат:</b> {_value(job.get('work_mode'))}\n"
             f"💷 <b>Зарплата:</b> {_value(salary)}\n"
             f"📝 <b>Суть:</b> {_value(job.get('summary_ru'))}\n"
-            f"❗ <b>Обязательные требования:</b> {_value(job.get('mandatory_requirements'))}\n"
-            f"<b>Desirable:</b> {_value(job.get('desirable_requirements'))}\n"
-            f"⚙️ <b>Особые условия:</b> {_value(job.get('special_conditions'))}\n"
-            f"✅ <b>Что подходит в CV:</b> {_value(job.get('cv_strengths'))}\n"
-            f"⚠️ <b>Пробелы/риски:</b> {_value(job.get('cv_gaps'))}\n"
-            f"🚩 <b>Замечания модели:</b> {_value(job.get('rejection_reasons'))}\n"
-            f"📄 <b>CV:</b> {_value(job.get('cv_filename'))}\n"
-            f"🔎 <b>Источник:</b> {_value(job.get('source'))}"
         )
+        if index <= detailed_jobs:
+            block = (
+                common
+                + f"🔐 <b>Прямой работодатель:</b> {_value(job.get('direct_employer_reason'))}\n"
+                + f"❗ <b>Обязательные требования:</b> {_value(job.get('mandatory_requirements'))}\n"
+                + f"<b>Desirable:</b> {_value(job.get('desirable_requirements'))}\n"
+                + f"⚙️ <b>Особые условия:</b> {_value(job.get('special_conditions'))}\n"
+                + f"✅ <b>Что подходит в CV:</b> {_value(job.get('cv_strengths'))}\n"
+                + f"⚠️ <b>Пробелы/риски:</b> {_value(job.get('cv_gaps'))}\n"
+                + f"🚩 <b>Замечания модели:</b> {_value(job.get('rejection_reasons'))}\n"
+                + f"📄 <b>CV:</b> {_value(job.get('cv_filename'))}\n"
+                + f"🔎 <b>Источник:</b> {_value(job.get('source'))}"
+            )
+        else:
+            block = (
+                common
+                + f"🔎 <b>Источник:</b> {_value(job.get('source'))}\n"
+                + "ℹ️ Подробности доступны по ссылке в названии вакансии."  # noqa: RUF001
+            )
         if len(block) > 3900:
             block = block[:3850] + "…"
         messages.append(block)

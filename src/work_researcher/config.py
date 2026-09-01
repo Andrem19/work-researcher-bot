@@ -51,7 +51,7 @@ DEFAULTS: dict = {
     },
     "telegram": {"enabled": True, "chat_id": "", "parse_mode": "HTML", "disable_web_page_preview": True},
     "report": {
-        "max_jobs": 40, "max_per_path": 12,
+        "max_jobs": 10, "max_per_path": 10, "detailed_jobs": 5,
         "pre_llm_max_per_path": 15, "include_seen": False,
     },
     "career_paths": {

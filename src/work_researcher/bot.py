@@ -307,7 +307,13 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
         if len(selected) >= int(settings.report.get("max_jobs", 40)):
             break
 
-    messages = render_report(selected, provider_health, cv_sync, started)
+    messages = render_report(
+        selected,
+        provider_health,
+        cv_sync,
+        started,
+        detailed_jobs=int(settings.report.get("detailed_jobs", 5)),
+    )
     message_ids = await send_messages(settings, messages) if deliver else []
     if deliver:
         async with db.connect(settings.db_path) as conn:

@@ -67,6 +67,31 @@ def test_telegram_report_escapes_untrusted_text() -> None:
     assert "Acme &amp; Co" in messages[1]
 
 
+def test_telegram_uses_five_detailed_then_compact_cards() -> None:
+    job = {
+        "title": "Junior Data Analyst", "url": "https://example.test/job",
+        "company": "Acme", "direct_employer_reason": "verified",
+        "path_label": "Analytics", "overall_score": 75,
+        "location_text": "Manchester", "work_mode": "hybrid",
+        "salary_raw": "£30,000", "summary_ru": "Краткое описание.",
+        "mandatory_requirements": ["SQL"], "desirable_requirements": ["Python"],
+        "special_conditions": [], "cv_strengths": ["SQL"], "cv_gaps": [],
+        "rejection_reasons": [], "cv_filename": "analytics.docx", "source": "test",
+    }
+    messages = render_report(
+        [{**job, "title": f"Junior Data Analyst {index}"} for index in range(1, 7)],
+        [{"provider": "test", "ok": True}],
+        {"files": [{}, {}, {}, {}]},
+        __import__("datetime").datetime.now(),
+        detailed_jobs=5,
+    )
+    assert len(messages) == 7
+    assert "Обязательные требования" in messages[5]
+    assert "Обязательные требования" not in messages[6]
+    assert "Подробности доступны по ссылке" in messages[6]
+    assert "первые <b>5</b> подробно" in messages[0]
+
+
 def test_glm_cannot_veto_a_hard_filtered_vacancy() -> None:
     settings = load_settings(Path("missing-test-config.toml"))
     card = JobCard(
