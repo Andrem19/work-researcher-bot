@@ -53,6 +53,19 @@ Telegram-отчёт содержит максимум 10 вакансий: пе�
 карточками с требованиями и анализом CV, позиции 6–10 — сокращёнными карточками
 с ключевыми данными и ссылкой.
 
+## Еженедельное исследование рынка
+
+Каждую пятницу в 19:00 UK time отдельный `work-researcher-market.timer`
+исследует рынок по матрице 4 карьерных направления × 3 уровня: Entry, Middle и
+High-paying (£80k+). GLM-5.3-Flash подтверждает релевантность и уровень роли,
+а воспроизводимый Python-анализ рассчитывает спрос на технологии, salary
+coverage, P25/P50/P75, распределение по квартилям и наиболее частые/дорогие
+пары и тройки технологий.
+
+Последний snapshot и история хранятся вне release в
+`/var/lib/work-researcher-bot/market`. Dashboard публикуется существующим Nginx:
+<https://devbot.remart.ovh/jobs/>.
+
 ## Локальные команды
 
 ```bash
@@ -60,6 +73,7 @@ uv sync --extra dev
 uv run work-researcher doctor
 uv run work-researcher sync-drive
 uv run work-researcher run-once --dry-run
+uv run work-researcher weekly-market
 uv run pytest -q
 ```
 
@@ -88,7 +102,9 @@ src/work_researcher/bot.py       nightly orchestration
 src/work_researcher/drive.py     public Drive CV snapshot
 src/work_researcher/career.py    hard eligibility filters
 src/work_researcher/llm.py       GLM structured assessment
+src/work_researcher/market.py    weekly market statistics and publication
 src/work_researcher/telegram.py  Telegram HTML reports
+dashboard/index.html             static interactive market dashboard
 src/work_researcher/providers/   vacancy sources
 src/work_researcher/server.py    separate local MCP/application surface
 deploy/                          systemd configuration and activation

@@ -23,7 +23,20 @@ jobs:
           enable-cache: true
       - run: uv python install 3.12
       - run: uv sync --frozen --extra dev
-      - run: uv run ruff check src/work_researcher/bot.py src/work_researcher/drive.py src/work_researcher/llm.py src/work_researcher/career.py src/work_researcher/telegram.py src/work_researcher/config.py src/work_researcher/cli.py src/work_researcher/persistence.py src/work_researcher/requirements.py tests/test_single_candidate.py
+      - run: >-
+          uv run ruff check
+          src/work_researcher/bot.py
+          src/work_researcher/drive.py
+          src/work_researcher/llm.py
+          src/work_researcher/career.py
+          src/work_researcher/market.py
+          src/work_researcher/telegram.py
+          src/work_researcher/config.py
+          src/work_researcher/cli.py
+          src/work_researcher/persistence.py
+          src/work_researcher/requirements.py
+          tests/test_single_candidate.py
+          tests/test_market.py
       - run: uv run pytest -q
 
   deploy:

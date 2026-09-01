@@ -1,0 +1,11 @@
+[Unit]
+Description=Run UK technology market research every Friday evening
+
+[Timer]
+OnCalendar=Fri *-*-* 19:00:00 Europe/London
+Persistent=true
+AccuracySec=1min
+Unit=work-researcher-market.service
+
+[Install]
+WantedBy=timers.target

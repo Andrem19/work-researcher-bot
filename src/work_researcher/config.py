@@ -54,6 +54,12 @@ DEFAULTS: dict = {
         "max_jobs": 10, "max_per_path": 10, "detailed_jobs": 5,
         "pre_llm_max_per_path": 15, "include_seen": False,
     },
+    "market": {
+        "window_days": 30, "limit_per_source": 40, "max_per_slice": 120,
+        "llm_batch_size": 6, "high_salary_threshold": 80000,
+        "minimum_combination_count": 2, "site_dir": "market/site",
+        "history_dir": "market/history", "history_weeks": 104,
+    },
     "career_paths": {
         "data_engineering": {
             "label": "Data Engineering",
@@ -119,6 +125,7 @@ class Settings:
     llm: dict = field(default_factory=dict)
     telegram: dict = field(default_factory=dict)
     report: dict = field(default_factory=dict)
+    market: dict = field(default_factory=dict)
     career_paths: dict = field(default_factory=dict)
 
     @property
@@ -177,7 +184,8 @@ def load_settings(config_path: Path | None = None) -> Settings:
         occasional_commute_miles=int(search.get("occasional_commute_miles", 55)), applicant=merged["applicant"],
         browser=merged["browser"], auth=merged["auth"], providers=merged["providers"], search_profiles=search.get("profiles", {}),
         blocklist_companies=list(merged.get("blocklist", {}).get("companies", [])), drive=merged["drive"], llm=merged["llm"],
-        telegram=merged["telegram"], report=merged["report"], career_paths=merged["career_paths"],
+        telegram=merged["telegram"], report=merged["report"], market=merged["market"],
+        career_paths=merged["career_paths"],
     )
     settings.db_path = settings.data_dir / "work_researcher.db"
     return settings

@@ -169,6 +169,22 @@ async def cmd_run_once(args) -> int:
     return 0
 
 
+async def cmd_weekly_market(args) -> int:
+    from .config import load_settings
+    from .market import run_weekly_market
+
+    result = await run_weekly_market(load_settings())
+    _print({
+        "ok": True,
+        "generated_at": result["generated_at"],
+        "raw_cards": result["raw_cards"],
+        "unique_path_cards": result["unique_path_cards"],
+        "analysed_cards": result["analysed_cards"],
+        "dashboard": "https://devbot.remart.ovh/jobs/",
+    })
+    return 0
+
+
 async def cmd_selftest(args) -> int:
     """In-process smoke test of every tool layer (no MCP client needed)."""
     from .config import ensure_dirs, load_settings
@@ -269,6 +285,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dry-run", action="store_true", help="Do not send Telegram messages")
     sp.add_argument("--include-seen", action="store_true", help="Include jobs already stored")
     sp.set_defaults(func=cmd_run_once)
+
+    sub.add_parser(
+        "weekly-market",
+        help="Build and publish the weekly 4-path x 3-level market dashboard",
+    ).set_defaults(func=cmd_weekly_market)
 
     sub.add_parser("sync-drive", help="Pull and index the four career CVs") \
         .set_defaults(func=cmd_sync_drive)

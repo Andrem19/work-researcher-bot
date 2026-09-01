@@ -40,6 +40,15 @@ uv run work-researcher run-once --dry-run
 `run-once --dry-run` still performs live Drive, providers and GLM calls, but
 does not send Telegram messages or mark jobs as delivered.
 
+## Weekly market dashboard
+
+`work-researcher weekly-market` creates an immutable dated snapshot plus the
+public `market/site/data.json`. Production runs it every Friday at 19:00 in the
+`Europe/London` timezone. Deployment installs the project-owned Nginx snippet,
+validates the complete configuration with `nginx -t`, then reloads Nginx. The
+dashboard is served at `https://devbot.remart.ovh/jobs/`; deployments update its
+UI but never trigger an unscheduled market crawl.
+
 The keyless production sources are Totaljobs, Reed HTML, Earthworks, GOV.UK
 Find a job and the official Civil Service Careers Government Digital and Data
 feed. Adzuna and Jooble remain enabled but report a visible credential warning
@@ -53,6 +62,7 @@ until their optional keys are configured.
 /etc/work-researcher-bot/config.toml         production config
 /etc/work-researcher-bot/env                 secrets, root:ubuntu 0640
 /var/lib/work-researcher-bot/                SQLite, CVs and sync staging
+/var/lib/work-researcher-bot/market/         weekly snapshots and public dashboard data
 ```
 
 The oneshot service is `work-researcher-bot.service`; the timer is
@@ -62,6 +72,8 @@ The oneshot service is `work-researcher-bot.service`; the timer is
 systemctl list-timers work-researcher-bot.timer
 sudo systemctl start work-researcher-bot.service
 journalctl -u work-researcher-bot.service -n 200 --no-pager
+systemctl list-timers work-researcher-market.timer
+journalctl -u work-researcher-market.service -n 200 --no-pager
 ```
 
 Operational exceptions are logged and also sent to Telegram as a bounded alert.

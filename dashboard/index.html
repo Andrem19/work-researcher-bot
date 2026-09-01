@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>UK Tech Career Market — Andrey Remnev</title>
+  <style>
+    :root{--bg:#07111f;--panel:#0d1a2d;--panel2:#11223a;--text:#e8f0fb;--muted:#91a4bc;--line:#203653;--cyan:#42d6c6;--blue:#5b9cff;--violet:#a78bfa;--amber:#f5bd57;--red:#fb7185;--green:#46d38d;--radius:18px}
+    *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at 15% -10%,#15335c 0,transparent 34%),radial-gradient(circle at 95% 5%,#173e42 0,transparent 27%),var(--bg);color:var(--text);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}
+    button{font:inherit}.shell{max-width:1440px;margin:auto;padding:30px 28px 64px}.mast{display:flex;gap:24px;align-items:flex-end;justify-content:space-between;margin-bottom:28px}.eyebrow{color:var(--cyan);font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase}.mast h1{font-size:clamp(28px,4vw,48px);line-height:1.08;margin:8px 0 8px;letter-spacing:-.04em}.subtitle{color:var(--muted);max-width:720px;margin:0}.freshness{text-align:right;color:var(--muted);white-space:nowrap}.freshness strong{display:block;color:var(--text);font-size:14px}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 14px var(--green);margin-right:8px}
+    .controls{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(14px);padding:12px 0 15px;margin-bottom:20px}.path-tabs,.level-tabs{display:flex;gap:8px;flex-wrap:wrap}.level-tabs{margin-top:10px}.tab{border:1px solid var(--line);background:rgba(13,26,45,.72);color:var(--muted);padding:10px 15px;border-radius:999px;cursor:pointer;transition:.18s}.tab:hover{border-color:#40658f;color:var(--text)}.tab[aria-selected=true]{background:var(--text);color:var(--bg);border-color:var(--text);font-weight:700}.level-tabs .tab[aria-selected=true]{background:var(--cyan);border-color:var(--cyan)}
+    .grid{display:grid;gap:16px}.kpis{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:16px}.card{background:linear-gradient(145deg,rgba(17,34,58,.93),rgba(10,23,40,.96));border:1px solid var(--line);border-radius:var(--radius);padding:20px;box-shadow:0 18px 50px rgba(0,0,0,.15)}.kpi-label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em}.kpi-value{font-size:clamp(23px,3vw,35px);font-weight:750;letter-spacing:-.035em;margin:5px 0}.kpi-note{font-size:13px;color:var(--muted)}.layout{grid-template-columns:minmax(0,1.35fr) minmax(320px,.65fr)}.section-title{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:16px}.section-title h2{font-size:19px;margin:0}.section-title p{color:var(--muted);margin:3px 0 0;font-size:13px}.pill{font-size:12px;color:var(--cyan);border:1px solid color-mix(in srgb,var(--cyan) 35%,transparent);background:color-mix(in srgb,var(--cyan) 8%,transparent);padding:4px 9px;border-radius:999px;white-space:nowrap}
+    .chart-wrap{min-height:390px}.scatter{width:100%;height:350px;display:block}.axis{stroke:var(--line);stroke-width:1}.gridline{stroke:var(--line);stroke-width:1;opacity:.55}.axis-label,.tick{fill:var(--muted);font-size:11px}.bubble{fill:var(--cyan);fill-opacity:.66;stroke:#b8fff6;stroke-width:1;cursor:pointer}.bubble:hover,.bubble:focus{fill-opacity:1;stroke-width:2}.bubble-label{fill:var(--text);font-size:11px;pointer-events:none}.empty{display:grid;place-items:center;min-height:220px;color:var(--muted);text-align:center}
+    .ranking{display:grid;gap:12px}.rank-row{display:grid;grid-template-columns:minmax(110px,1fr) 2fr auto;gap:10px;align-items:center}.rank-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bar{height:8px;background:#172a44;border-radius:20px;overflow:hidden}.bar span{display:block;height:100%;background:linear-gradient(90deg,var(--blue),var(--cyan));border-radius:inherit}.rank-value{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted);font-size:13px}.rank-value strong{color:var(--text);display:block}.full{grid-column:1/-1}.table-wrap{overflow:auto}.data-table{width:100%;border-collapse:collapse;min-width:730px}.data-table th{text-align:left;color:var(--muted);font-weight:600;font-size:12px;border-bottom:1px solid var(--line);padding:10px 9px;position:sticky;top:0;background:var(--panel)}.data-table td{border-bottom:1px solid rgba(32,54,83,.65);padding:11px 9px;font-variant-numeric:tabular-nums}.data-table tr:hover td{background:rgba(91,156,255,.045)}.num{text-align:right!important}.premium.plus{color:var(--green)}.premium.minus{color:var(--red)}.qbar{display:flex;gap:3px;min-width:160px}.qbar span{height:14px;min-width:3px;border-radius:3px}.q1{background:#315a8f}.q2{background:#477fb7}.q3{background:#42b7bd}.q4{background:#f5bd57}.legend{display:flex;gap:13px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-top:10px}.legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px}
+    .combo-grid{grid-template-columns:1fr 1fr}.combo-list{display:grid;gap:9px}.combo{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;padding:10px 0;border-bottom:1px solid rgba(32,54,83,.6)}.combo:last-child{border:0}.combo-name{font-weight:650}.combo-meta{color:var(--muted);font-size:12px;margin-top:2px}.combo-pay{text-align:right;font-weight:750;white-space:nowrap}.combo-pay small{display:block;color:var(--muted);font-weight:400}.footer-grid{grid-template-columns:1fr 1fr;margin-top:16px}.method{color:var(--muted);font-size:13px}.method strong{color:var(--text)}.source-list{display:flex;flex-wrap:wrap;gap:8px}.source{padding:6px 9px;border:1px solid var(--line);border-radius:10px;color:var(--muted);font-size:12px}.source.ok{color:var(--green)}.source.bad{color:var(--amber)}.error{padding:20px;border:1px solid rgba(251,113,133,.5);background:rgba(251,113,133,.08);border-radius:var(--radius);color:#fecdd3}.loading{padding:80px 20px;text-align:center;color:var(--muted)}
+    @media(max-width:980px){.kpis{grid-template-columns:1fr 1fr}.layout,.combo-grid,.footer-grid{grid-template-columns:1fr}.mast{align-items:flex-start;flex-direction:column}.freshness{text-align:left}.chart-wrap{min-height:330px}.scatter{height:300px}}
+    @media(max-width:560px){.shell{padding:20px 14px 48px}.kpis{grid-template-columns:1fr}.card{padding:16px}.tab{padding:9px 12px}.rank-row{grid-template-columns:110px 1fr}.rank-value{grid-column:2}.section-title{flex-direction:column}.bubble-label{display:none}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="mast">
+      <div><div class="eyebrow">UK technology market intelligence</div><h1>Career Stack Radar</h1><p class="subtitle">Спрос, зарплатные квантили и сочетания технологий по четырём карьерным направлениям и трём уровням ролей.</p></div>
+      <div class="freshness"><strong><span class="dot"></span>Weekly snapshot</strong><span id="updated">загрузка данных…</span></div>
+    </header>
+    <div id="app"><div class="loading">Загружаю актуальный рыночный snapshot…</div></div>
+  </main>
+  <script>
+  (()=>{
+    const state={data:null,path:null,level:'entry'};
+    const app=document.getElementById('app');
+    const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const money=v=>v==null?'—':new Intl.NumberFormat('en-GB',{style:'currency',currency:'GBP',maximumFractionDigits:0}).format(v);
+    const pct=v=>`${Number(v||0).toFixed(1)}%`;
+    const premium=v=>v==null?'—':`${v>=0?'+':''}${money(v)}`;
+    const selected=()=>state.data.paths[state.path].levels[state.level];
+    const reliablePay=rows=>rows.filter(r=>r.salary_count>=2&&r.salary.p50!=null).sort((a,b)=>b.salary.p50-a.salary.p50);
+    function controls(){
+      const paths=Object.entries(state.data.paths).map(([id,p])=>`<button class="tab" data-path="${esc(id)}" aria-selected="${id===state.path}">${esc(p.label)}</button>`).join('');
+      const levels=[['entry','Entry'],['middle','Middle'],['high','High-paying £80k+']].map(([id,label])=>`<button class="tab" data-level="${id}" aria-selected="${id===state.level}">${label}</button>`).join('');
+      return `<nav class="controls" aria-label="Фильтры рынка"><div class="path-tabs" role="tablist" aria-label="Направление">${paths}</div><div class="level-tabs" role="tablist" aria-label="Уровень">${levels}</div></nav>`;
+    }
+    function kpis(s){
+      const demand=s.technologies[0]; const pay=reliablePay(s.technologies)[0];
+      return `<section class="grid kpis" aria-label="Ключевые показатели">
+        <div class="card"><div class="kpi-label">Вакансий в срезе</div><div class="kpi-value">${s.job_count}</div><div class="kpi-note">30-дневное окно, после дедупликации</div></div>
+        <div class="card"><div class="kpi-label">Медиана зарплаты</div><div class="kpi-value">${money(s.salary.p50)}</div><div class="kpi-note">Coverage ${pct(s.salary_coverage_pct)} · n=${s.salary_count}</div></div>
+        <div class="card"><div class="kpi-label">Максимальный спрос</div><div class="kpi-value">${demand?esc(demand.name):'—'}</div><div class="kpi-note">${demand?`${pct(demand.prevalence_pct)} вакансий · n=${demand.count}`:'Недостаточно данных'}</div></div>
+        <div class="card"><div class="kpi-label">Самая дорогая технология</div><div class="kpi-value">${pay?esc(pay.name):'—'}</div><div class="kpi-note">${pay?`медиана ${money(pay.salary.p50)} · n=${pay.salary_count}`:'Нужно минимум 2 salary observations'}</div></div>
+      </section>`;
+    }
+    function ranking(s){
+      const rows=s.technologies.slice(0,12); const max=Math.max(...rows.map(r=>r.prevalence_pct),1);
+      if(!rows.length)return '<div class="empty">В этом срезе пока нет устойчивых технологических сигналов.</div>';
+      return `<div class="ranking">${rows.map(r=>`<div class="rank-row"><div class="rank-name">${esc(r.name)}</div><div class="bar" aria-label="${pct(r.prevalence_pct)}"><span style="width:${Math.max(2,r.prevalence_pct/max*100)}%"></span></div><div class="rank-value"><strong>${pct(r.prevalence_pct)}</strong>${money(r.salary.p50)}</div></div>`).join('')}</div>`;
+    }
+    function scatter(s){
+      const rows=s.technologies.filter(r=>r.salary_count>=2&&r.salary.p50!=null);
+      if(!rows.length)return '<div class="empty">Недостаточно опубликованных зарплат для demand/pay карты.</div>';
+      const W=760,H=350,m={l:66,r:26,t:24,b:50}; const xMax=Math.max(...rows.map(r=>r.prevalence_pct),10)*1.08;
+      const ys=rows.map(r=>r.salary.p50),yMin=Math.max(0,Math.min(...ys)*.88),yMax=Math.max(...ys)*1.10;
+      const x=v=>m.l+v/xMax*(W-m.l-m.r),y=v=>H-m.b-(v-yMin)/(yMax-yMin||1)*(H-m.t-m.b);
+      const yTicks=Array.from({length:5},(_,i)=>yMin+(yMax-yMin)*i/4); const xTicks=Array.from({length:5},(_,i)=>xMax*i/4);
+      return `<svg class="scatter" viewBox="0 0 ${W} ${H}" role="img" aria-label="Популярность технологий по оси X и медианная зарплата по оси Y">
+        ${yTicks.map(v=>`<line class="gridline" x1="${m.l}" x2="${W-m.r}" y1="${y(v)}" y2="${y(v)}"/><text class="tick" x="${m.l-9}" y="${y(v)+4}" text-anchor="end">£${Math.round(v/1000)}k</text>`).join('')}
+        ${xTicks.map(v=>`<line class="gridline" y1="${m.t}" y2="${H-m.b}" x1="${x(v)}" x2="${x(v)}"/><text class="tick" x="${x(v)}" y="${H-m.b+20}" text-anchor="middle">${v.toFixed(0)}%</text>`).join('')}
+        <line class="axis" x1="${m.l}" x2="${W-m.r}" y1="${H-m.b}" y2="${H-m.b}"/><line class="axis" x1="${m.l}" x2="${m.l}" y1="${m.t}" y2="${H-m.b}"/>
+        <text class="axis-label" x="${(m.l+W-m.r)/2}" y="${H-8}" text-anchor="middle">Доля вакансий с технологией</text><text class="axis-label" transform="translate(15 ${(m.t+H-m.b)/2}) rotate(-90)" text-anchor="middle">Медианная зарплата</text>
+        ${rows.map(r=>{const radius=5+Math.sqrt(r.count)*1.5;return `<g><circle class="bubble" tabindex="0" cx="${x(r.prevalence_pct)}" cy="${y(r.salary.p50)}" r="${radius}"><title>${esc(r.name)}: ${pct(r.prevalence_pct)}, ${money(r.salary.p50)}, n=${r.salary_count}</title></circle><text class="bubble-label" x="${x(r.prevalence_pct)+radius+4}" y="${y(r.salary.p50)+4}">${esc(r.name)}</text></g>`}).join('')}
+      </svg>`;
+    }
+    function quartileTable(s){
+      const rows=s.technologies.slice(0,18); if(!rows.length)return '<div class="empty">Нет данных.</div>';
+      const body=rows.map(r=>{const q=r.salary_quartiles,total=Object.values(q).reduce((a,b)=>a+b,0);const seg=k=>total?Math.max(3,q[k]/total*100):0;return `<tr><td><strong>${esc(r.name)}</strong></td><td class="num">${r.count}</td><td class="num">${pct(r.prevalence_pct)}</td><td class="num">${money(r.salary.p25)}</td><td class="num">${money(r.salary.p50)}</td><td class="num">${money(r.salary.p75)}</td><td><div class="qbar" aria-label="Q1 ${q.q1}, Q2 ${q.q2}, Q3 ${q.q3}, Q4 ${q.q4}"><span class="q1" style="width:${seg('q1')}%"></span><span class="q2" style="width:${seg('q2')}%"></span><span class="q3" style="width:${seg('q3')}%"></span><span class="q4" style="width:${seg('q4')}%"></span></div></td></tr>`}).join('');
+      return `<div class="table-wrap"><table class="data-table"><thead><tr><th>Технология</th><th class="num">Jobs</th><th class="num">Demand</th><th class="num">P25</th><th class="num">Median</th><th class="num">P75</th><th>Salary quartiles</th></tr></thead><tbody>${body}</tbody></table></div><div class="legend"><span><i class="q1"></i>Q1 lower 25%</span><span><i class="q2"></i>Q2</span><span><i class="q3"></i>Q3</span><span><i class="q4"></i>Q4 top 25%</span></div>`;
+    }
+    function comboList(rows,sort){
+      const sorted=[...rows].filter(r=>sort==='pay'?r.salary_count>=2:true).sort((a,b)=>sort==='pay'?(b.salary.p50||0)-(a.salary.p50||0):b.count-a.count).slice(0,12);
+      if(!sorted.length)return '<div class="empty">Нужно минимум два совместных наблюдения.</div>';
+      return `<div class="combo-list">${sorted.map(r=>`<div class="combo"><div><div class="combo-name">${esc(r.name)}</div><div class="combo-meta">${r.count} вакансий · ${pct(r.prevalence_pct)} спроса · salary n=${r.salary_count}</div></div><div class="combo-pay">${money(r.salary.p50)}<small class="${(r.median_premium||0)>=0?'premium plus':'premium minus'}">${premium(r.median_premium)} vs slice</small></div></div>`).join('')}</div>`;
+    }
+    function footer(){
+      const d=state.data; const sources=d.provider_health.map(s=>`<span class="source ${s.ok?'ok':'bad'}">${esc(s.provider)} · ${s.jobs}${s.ok?'':' ⚠'}</span>`).join('');
+      return `<section class="grid footer-grid"><div class="card method"><div class="section-title"><div><h2>Методология</h2><p>Числа вычисляются кодом, GLM используется только для семантической классификации.</p></div></div><p><strong>Entry:</strong> ${esc(d.methodology.entry)}</p><p><strong>Middle:</strong> ${esc(d.methodology.middle)}</p><p><strong>High:</strong> ${esc(d.methodology.high)}</p><p><strong>Salary:</strong> ${esc(d.methodology.salary)}</p></div><div class="card"><div class="section-title"><div><h2>Покрытие источников</h2><p>${d.raw_cards} исходных карточек · ${d.unique_path_cards} уникальных path-кандидатов · ${d.analysed_cards} передано в анализ</p></div></div><div class="source-list">${sources}</div></div></section>`;
+    }
+    function render(){
+      const s=selected(); const path=state.data.paths[state.path];
+      app.innerHTML=`${controls()}${kpis(s)}<section class="grid layout"><div class="card chart-wrap"><div class="section-title"><div><h2>Demand × salary</h2><p>${esc(path.label)} · ${esc(state.level)} · размер круга отражает число вакансий</p></div><span class="pill">salary n ≥ 2</span></div>${scatter(s)}</div><div class="card"><div class="section-title"><div><h2>Технологии по спросу</h2><p>Доля вакансий и медианная зарплата</p></div></div>${ranking(s)}</div><div class="card full"><div class="section-title"><div><h2>Квантили зарплаты</h2><p>Сколько вакансий с технологией попало в каждую четверть salary distribution выбранного среза</p></div><span class="pill">P25 · P50 · P75</span></div>${quartileTable(s)}</div></section><section class="grid combo-grid" style="margin-top:16px"><div class="card"><div class="section-title"><div><h2>Стеки с максимальным спросом</h2><p>Пары и тройки технологий, встречающиеся вместе</p></div></div>${comboList(s.combinations,'demand')}</div><div class="card"><div class="section-title"><div><h2>Самые высокооплачиваемые стеки</h2><p>Минимум две вакансии с опубликованной зарплатой</p></div></div>${comboList(s.combinations,'pay')}</div></section>${footer()}`;
+      app.querySelectorAll('[data-path]').forEach(b=>b.onclick=()=>{state.path=b.dataset.path;render()}); app.querySelectorAll('[data-level]').forEach(b=>b.onclick=()=>{state.level=b.dataset.level;render()});
+    }
+    fetch(`./data.json?t=${Date.now()}`,{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json()}).then(data=>{state.data=data;state.path=Object.keys(data.paths)[0];document.getElementById('updated').textContent=new Intl.DateTimeFormat('ru-RU',{dateStyle:'medium',timeStyle:'short',timeZone:'Europe/London'}).format(new Date(data.generated_at))+' UK';render()}).catch(error=>{app.innerHTML=`<div class="error"><strong>Dashboard ещё не получил первый weekly snapshot.</strong><br>${esc(error.message)}. После первого запуска данные появятся автоматически.</div>`;document.getElementById('updated').textContent='данные ожидаются'});
+  })();
+  </script>
+</body>
+</html>

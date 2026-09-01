@@ -52,6 +52,17 @@ detailed_jobs = 5
 pre_llm_max_per_path = 15
 include_seen = false
 
+[market]
+window_days = 30
+limit_per_source = 40
+max_per_slice = 120
+llm_batch_size = 6
+high_salary_threshold = 80000
+minimum_combination_count = 2
+site_dir = "market/site"
+history_dir = "market/history"
+history_weeks = 104
+
 [providers.totaljobs]
 enabled = true
 

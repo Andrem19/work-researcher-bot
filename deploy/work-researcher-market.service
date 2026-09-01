@@ -1,0 +1,23 @@
+[Unit]
+Description=Weekly UK technology market research and dashboard snapshot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/work-researcher-bot/current
+EnvironmentFile=/etc/work-researcher-bot/env
+Environment=WORK_RESEARCHER_CONFIG=/etc/work-researcher-bot/config.toml
+RuntimeDirectory=work-researcher-bot
+ExecStart=/usr/bin/flock -n /run/work-researcher-bot/weekly-market.lock /opt/work-researcher-bot/current/.venv/bin/work-researcher weekly-market
+TimeoutStartSec=90min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/work-researcher-bot
+
+[Install]
+WantedBy=multi-user.target
