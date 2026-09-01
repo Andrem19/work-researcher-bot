@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import shutil
+import tempfile
 from pathlib import Path
 
 from .config import Settings
@@ -54,52 +55,57 @@ def _select(settings: Settings, files: list[Path]) -> list[Path]:
 def _sync(settings: Settings) -> dict:
     import gdown
 
-    stage = settings.data_dir / "cv-sync-stage"
-    shutil.rmtree(stage, ignore_errors=True)
-    stage.mkdir(parents=True, exist_ok=True)
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    # A fresh directory avoids a failed run (or an administrator's manual run)
+    # leaving an unwritable shared staging directory behind for the service user.
+    stage = Path(tempfile.mkdtemp(prefix="cv-sync-stage-", dir=settings.data_dir))
     url = _folder_url(settings)
     try:
-        downloaded = gdown.download_folder(
-            url=url,
-            output=str(stage),
-            quiet=True,
-            use_cookies=False,
-            remaining_ok=False,
-        )
-    except Exception as exc:
-        raise DriveSyncError(f"public Drive download failed: {exc}") from exc
-    if not downloaded:
-        raise DriveSyncError(
-            "public Drive folder returned no files; verify that 'Anyone with the link' has Viewer access"
-        )
+        try:
+            downloaded = gdown.download_folder(
+                url=url,
+                output=str(stage),
+                quiet=True,
+                use_cookies=False,
+                remaining_ok=False,
+            )
+        except Exception as exc:
+            raise DriveSyncError(f"public Drive download failed: {exc}") from exc
+        if not downloaded:
+            raise DriveSyncError(
+                "public Drive folder returned no files; "
+                "verify that 'Anyone with the link' has Viewer access"
+            )
 
-    selected = _select(settings, [Path(path) for path in downloaded])
-    from .cvmanager import extract_text
+        selected = _select(settings, [Path(path) for path in downloaded])
+        from .cvmanager import extract_text
 
-    records = []
-    for path in selected:
-        if path.stat().st_size < 1024:
-            raise DriveSyncError(f"downloaded CV is unexpectedly small: {path.name}")
-        if path.suffix.lower() in {".docx", ".pdf"} and len(extract_text(path).strip()) < 200:
-            raise DriveSyncError(f"CV could not be parsed or contains too little text: {path.name}")
-        records.append({"name": path.name, "size": path.stat().st_size})
+        records = []
+        for path in selected:
+            if path.stat().st_size < 1024:
+                raise DriveSyncError(f"downloaded CV is unexpectedly small: {path.name}")
+            if path.suffix.lower() in {".docx", ".pdf"} and len(extract_text(path).strip()) < 200:
+                raise DriveSyncError(f"CV could not be parsed or contains too little text: {path.name}")
+            records.append({"name": path.name, "size": path.stat().st_size})
 
-    # Replace the prior snapshot only after all four new files validate.
-    settings.cv_dir.mkdir(parents=True, exist_ok=True)
-    wanted = {item["name"] for item in records}
-    for existing in settings.cv_dir.iterdir():
-        if (
-            existing.is_file()
-            and existing.suffix.lower() in SUPPORTED_SUFFIXES
-            and existing.name not in wanted
-        ):
-            existing.unlink()
-    for source in selected:
-        target = settings.cv_dir / source.name
-        temporary = target.with_suffix(target.suffix + ".part")
-        shutil.copyfile(source, temporary)
-        temporary.replace(target)
-    return {"ok": True, "folder_url": url, "files": records}
+        # Replace the prior snapshot only after all four new files validate.
+        settings.cv_dir.mkdir(parents=True, exist_ok=True)
+        wanted = {item["name"] for item in records}
+        for existing in settings.cv_dir.iterdir():
+            if (
+                existing.is_file()
+                and existing.suffix.lower() in SUPPORTED_SUFFIXES
+                and existing.name not in wanted
+            ):
+                existing.unlink()
+        for source in selected:
+            target = settings.cv_dir / source.name
+            temporary = target.with_suffix(target.suffix + ".part")
+            shutil.copyfile(source, temporary)
+            temporary.replace(target)
+        return {"ok": True, "folder_url": url, "files": records}
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
 
 
 async def sync_cvs_from_drive(settings: Settings) -> dict:
