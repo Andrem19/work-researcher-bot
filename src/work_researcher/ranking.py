@@ -8,7 +8,8 @@ from .domain import JobCard
 from .textutils import annualise, query_terms, term_coverage
 
 SOURCE_WEIGHT = {
-    "reed": 1.00, "adzuna": 1.00, "totaljobs": 1.00, "findajob": 0.95,
+    "reed": 1.00, "adzuna": 1.00, "totaljobs": 1.00, "findajob": 1.00,
+    "civil_service": 1.05,
     "earthworks": 0.95, "jooble": 0.90, "observation": 0.90,
 }
 

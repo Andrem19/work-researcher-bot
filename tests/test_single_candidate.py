@@ -4,6 +4,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from work_researcher import persistence as db
+from work_researcher.bot import _build_ranked_jobs
 from work_researcher.career import deterministic_assessment, location_allowed
 from work_researcher.config import load_settings
 from work_researcher.domain import JobCard
@@ -47,6 +48,14 @@ def test_agency_and_senior_roles_are_rejected() -> None:
     assert deterministic_assessment(senior, "data_engineering", "Python SQL")["eligible"] is False
 
 
+def test_apprentice_role_with_manager_in_occupation_name_is_entry_level() -> None:
+    apprentice = JobCard(
+        source="civil_service", title="Apprentice IT Asset Manager",
+        company="Department for Work and Pensions", location_text="Blackpool",
+    )
+    assert deterministic_assessment(apprentice, "software_data_platform", "Python SQL")["eligible"] is True
+
+
 def test_telegram_report_escapes_untrusted_text() -> None:
     messages = render_report([{
         "title": "A < B", "url": "https://example.test/?a=1&b=2", "company": "Acme & Co",
@@ -56,6 +65,26 @@ def test_telegram_report_escapes_untrusted_text() -> None:
     }], [{"provider": "test", "ok": True}], {"files": [{}, {}, {}, {}]}, __import__("datetime").datetime.now())
     assert "A &lt; B" in messages[1]
     assert "Acme &amp; Co" in messages[1]
+
+
+def test_glm_cannot_veto_a_hard_filtered_vacancy() -> None:
+    settings = load_settings(Path("missing-test-config.toml"))
+    card = JobCard(
+        source="test", title="Junior Data Analyst", company="Acme",
+        location_text="Blackpool", url="https://example.test/job",
+    )
+    base = {
+        "path_id": "analytics", "base_score": 73, "work_mode": "on_site",
+        "posted_by_reason": "no agency signals",
+    }
+    jobs = _build_ranked_jobs({"job-1": {
+        "job_key": "job-1", "recommended": False, "direct_employer": False,
+        "overall_score": 42, "rejection_reasons": ["low CV fit"],
+    }}, {"job-1": (card, base, {"filename": "analytics.docx"})}, settings)
+    assert len(jobs) == 1
+    assert jobs[0]["hard_filters_passed"] is True
+    assert jobs[0]["review_tier"] == "fallback"
+    assert jobs[0]["direct_employer"] is True
 
 
 def test_drive_selection_excludes_geology(tmp_path: Path) -> None:

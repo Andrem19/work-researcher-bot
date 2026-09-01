@@ -25,8 +25,9 @@
 - hybrid — расширенная зона до Manchester и сопоставимых городов;
 - senior/lead/manager роли, требования 3+ лет и платные training/course ads
   исключаются;
-- GLM проверяет обязательные и желательные требования, специальные условия,
-  соответствие выбранному CV и формирует русское резюме;
+- GLM ранжирует, проверяет обязательные и желательные требования, специальные
+  условия, соответствие выбранному CV и формирует русское резюме; он не может
+  исключить vacancy, уже прошедшую жёсткие фильтры;
 - уже доставленные вакансии хранятся в SQLite и повторно не отправляются.
 
 ## Runtime
@@ -34,7 +35,7 @@
 ```text
 22:00 Europe/London
   -> public Google Drive: download + validate exactly four non-geology CVs
-  -> configured job providers: parallel collection + description enrichment
+  -> configured job providers, включая GOV.UK Find a job и Civil Service Careers
   -> deterministic entry/location/agency filters
   -> GLM-5.3-Flash structured assessment and ranking
   -> Telegram HTML header + one detailed vacancy card per message

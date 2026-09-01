@@ -35,6 +35,47 @@ PATH_KEYWORDS = {
 }
 
 
+def _build_ranked_jobs(assessment_map: dict[str, dict], candidate_map: dict, settings: Settings) -> list[dict]:
+    """Merge model opinions into the hard-filtered shortlist without a veto."""
+    jobs = []
+    for assessment in assessment_map.values():
+        key = str(assessment.get("job_key", ""))
+        if key not in candidate_map:
+            continue
+        card, base, cv = candidate_map[key]
+        overall = int(assessment.get("overall_score") or base.get("base_score") or 0)
+        glm_recommended = bool(assessment.get("recommended"))
+        glm_direct = bool(assessment.get("direct_employer"))
+        if glm_recommended and glm_direct:
+            review_tier = "strong"
+        elif overall >= 55:
+            review_tier = "review"
+        else:
+            review_tier = "fallback"
+        jobs.append({
+            **assessment, "job_key": key, "overall_score": overall,
+            "title": card.title, "company": card.company,
+            "location_text": card.location_text, "salary_raw": card.salary_raw,
+            "url": card.apply_url or card.url, "source": card.source,
+            "work_mode": base["work_mode"], "path_id": base["path_id"],
+            "path_label": settings.career_paths[base["path_id"]]["label"],
+            "cv_filename": cv["filename"],
+            "glm_recommended": glm_recommended,
+            "glm_direct_employer": glm_direct,
+            "review_tier": review_tier,
+            "hard_filters_passed": True,
+            # Direct-employer status is established by the hard filter. Keep
+            # GLM's lower-confidence opinion separately instead of re-vetoing.
+            "direct_employer": True,
+            "direct_employer_reason": (
+                assessment.get("direct_employer_reason")
+                if glm_direct else base.get("posted_by_reason")
+            ),
+        })
+    jobs.sort(key=lambda item: -item["overall_score"])
+    return jobs
+
+
 def _assign_cvs(settings: Settings) -> dict[str, dict]:
     files = sorted(p for p in settings.cv_dir.iterdir() if p.suffix.lower() in {".docx", ".pdf", ".doc"})
     if len(files) != 4:
@@ -210,33 +251,52 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
     assessments = []
     batch_size = int(settings.llm.get("batch_size", 6))
     for offset in range(0, len(llm_items), batch_size):
+        batch = llm_items[offset:offset + batch_size]
         logger.info(
             "GLM batch %d/%d",
             offset // batch_size + 1,
             (len(llm_items) + batch_size - 1) // batch_size,
         )
-        assessments.extend(await assess_batch(settings, llm_items[offset:offset + batch_size]))
+        try:
+            assessments.extend(await assess_batch(settings, batch))
+        except Exception as exc:
+            logger.warning("GLM batch failed; keeping deterministic shortlist: %s", exc)
 
-    jobs = []
-    for assessment in assessments:
-        key = str(assessment.get("job_key", ""))
-        if key not in candidate_map:
-            continue
-        card, base, cv = candidate_map[key]
-        if not assessment.get("recommended") or not assessment.get("direct_employer"):
-            continue
-        overall = int(assessment.get("overall_score") or 0)
-        job = {
-            **assessment, "job_key": key, "overall_score": overall,
-            "title": card.title, "company": card.company,
-            "location_text": card.location_text, "salary_raw": card.salary_raw,
-            "url": card.apply_url or card.url, "source": card.source,
-            "work_mode": base["work_mode"], "path_id": base["path_id"],
-            "path_label": settings.career_paths[base["path_id"]]["label"],
-            "cv_filename": cv["filename"],
-        }
-        jobs.append(job)
-    jobs.sort(key=lambda item: -item["overall_score"])
+    # GLM ranks and explains vacancies; it must never veto a vacancy which has
+    # already passed the direct-employer, entry-level, location and requirement
+    # filters. It may also omit items from malformed/partial JSON, so fill every
+    # missing assessment with a transparent deterministic fallback.
+    assessment_map = {
+        str(item.get("job_key", "")): item
+        for item in assessments
+        if str(item.get("job_key", "")) in candidate_map
+    }
+    for item in llm_items:
+        key = str(item["job_key"])
+        if key not in assessment_map:
+            base = item["deterministic"]
+            assessment_map[key] = {
+                "job_key": key,
+                "direct_employer": True,
+                "direct_employer_reason": base.get("posted_by_reason"),
+                "entry_level_fit": base.get("base_score", 0),
+                "career_path_fit": base.get("base_score", 0),
+                "cv_fit": 0,
+                "overall_score": base.get("base_score", 0),
+                "recommended": False,
+                "summary_ru": (
+                    "Вакансия прошла все жёсткие фильтры, но модель не вернула "
+                    "оценку. Она включена в отчёт для ручного решения."
+                ),
+                "mandatory_requirements": base.get("mandatory", []),
+                "desirable_requirements": base.get("desirable", []),
+                "special_conditions": [],
+                "cv_strengths": [],
+                "cv_gaps": ["Автоматическая оценка GLM недоступна или неполна"],
+                "rejection_reasons": [],
+            }
+
+    jobs = _build_ranked_jobs(assessment_map, candidate_map, settings)
     per_path = defaultdict(int)
     selected = []
     for job in jobs:

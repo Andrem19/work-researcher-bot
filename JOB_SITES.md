@@ -20,13 +20,13 @@ Support tiers used by Work Researcher MCP:
 | [LinkedIn Jobs](https://www.linkedin.com/jobs) | browser | ToS restrict automation — surface to user, slow pace |
 | [Glassdoor](https://www.glassdoor.co.uk) | browser | same as CV-Library |
 | [Jobserve](https://www.jobserve.com) | browser | results page is a JS shell over a session search |
-| [FindAJob / GOV.UK Work Hub](https://www.jobs.service.gov.uk/jobs) | browser | GOV.UK's job search (replaces the old findajob.dwp.gov.uk). JS SPA — 618+ results for "data analyst". Filters: REMOTE/ONSITE/HYBRID/FIELD_BASED (maps to our work_mode). Sign in via gov.uk account (email/password or GOV.UK One Login, NOT Google SSO). |
+| [FindAJob / GOV.UK Work Hub](https://www.jobs.service.gov.uk/jobs/search) | built-in | Public listings; direct official request with a keyless public-reader fallback when Akamai blocks the server. |
+| [Civil Service Careers — Government Digital and Data](https://www.civil-service-careers.gov.uk/professions/working-in-digital-data-and-technology/) | built-in | Official live Civil Service digital/data vacancy feed; application links lead to Civil Service Jobs. |
 | [Monster UK](https://www.monster.co.uk) | — | UK operations closed (2024) |
 | [Otta / Welcome to the Jungle](https://uk.welcometothejungle.com) | future | tech/graduate roles |
 | [CWJobs / TechnoJobs](https://www.cwjobs.co.uk) | future | IT boards, HTML like Totaljobs |
 | [jobs.ac.uk](https://www.jobs.ac.uk) | future | academia — research geology roles; plain HTML |
 | [Rigzone](https://www.rigzone.com) / [Oilandgasjobsearch](https://www.oilandgasjobsearch.com) | future | energy/geoscience niches |
-| [Civil Service Jobs](https://www.jobsearch.civilservicejobs.service.gov.uk) | future | own account, geology/data roles in gov |
 | [Escape the City](https://escapethecity.org) | future | career-change niche |
 | [eFinancialCareers](https://www.efinancialcareers.co.uk) | future | finance analytics roles |
 

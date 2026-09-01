@@ -1,9 +1,9 @@
-"""GOV.UK Work Hub (www.jobs.service.gov.uk/jobs) — browser-only provider.
+"""GOV.UK Find a job / Work Hub provider.
 
-The site renders results as a JS SPA; HTTP returns a bare shell. The agent
-searches it with the browser_* tools and feeds findings back through
-submit_job_observations. This module provides a scrape helper and the
-parsing logic so the agent can call it from a single browser_eval.
+The official result page is attempted first. Some server networks receive an
+Akamai 403, so the provider can fall back to Jina Reader's public read-through
+of the same public GOV.UK result URL. No account, cookie or Google token is
+used. Browser helpers remain below for interactive/local MCP use.
 
 Search URL (GET, works in the browser):
   https://www.jobs.service.gov.uk/jobs?keywords=<query>&location=<place>&locationId=<id>
@@ -18,11 +18,23 @@ Posting date, Salary range, Contract type, Hours.
 
 from __future__ import annotations
 
+import asyncio
 import re
-from datetime import UTC, datetime, timedelta
+import time
+from datetime import UTC, datetime
 from urllib.parse import quote_plus
 
+import httpx
+
+from ..domain import JobCard
+from ..textutils import clean, parse_salary, query_terms
+from .base import ProviderError, SearchQuery, html_client
+
 BASE = "https://www.jobs.service.gov.uk"
+READER_BASE = "https://r.jina.ai/"
+_READER_LOCK = asyncio.Lock()
+_READER_LAST_REQUEST = 0.0
+_READER_MIN_INTERVAL_S = 3.2  # public endpoint advertises 20 requests/minute
 
 # The JS the agent runs via browser_eval to extract job cards as JSON.
 # Run this AFTER navigating to a search results page.
@@ -105,15 +117,113 @@ SCRAPE_LINKS_JS = r"""
 
 def search_url(query: str, location: str | None = None,
                work_pattern: str | None = None) -> str:
-    """Build a Work Hub search URL (works as GET in the browser)."""
+    """Build the current public Work Hub search URL."""
     params = {"keywords": query}
     if location and location.upper() not in ("UK", "UNITED KINGDOM"):
         params["location"] = location
     qs = "&".join(f"{k}={quote_plus(v)}" for k, v in params.items())
-    url = f"{BASE}/jobs?{qs}"
+    url = f"{BASE}/jobs/search?{qs}&pageNumber=1"
     if work_pattern:
         url += f"&workingPattern={work_pattern}"
     return url
+
+
+def _repair_reader_text(value: str) -> str:
+    """Repair the occasional replacement character in reader output."""
+    value = re.sub(r"�(?=\d)", "£", value or "")
+    return value.replace("�", "'")
+
+
+def parse_reader_markdown(markdown: str, limit: int = 50) -> list[JobCard]:
+    """Parse the markdown representation of the official search result list."""
+    markdown = _repair_reader_text(markdown)
+    starts = list(re.finditer(
+        r"^## \[(?P<title>.+?)\]\((?P<url>https://www\.jobs\.service\.gov\.uk/jobs/[a-f0-9]{20,}[^)]*)\)\s*$",
+        markdown,
+        re.M,
+    ))
+    cards: list[JobCard] = []
+    for index, match in enumerate(starts):
+        end = starts[index + 1].start() if index + 1 < len(starts) else len(markdown)
+        body = markdown[match.end():end]
+        body = body.split("\n* * *", 1)[0]
+        parts = [clean(line) for line in body.splitlines() if clean(line) and clean(line) != "* * *"]
+        if not parts:
+            continue
+        employer_location = parts[0]
+        company, separator, location = employer_location.rpartition(" - ")
+        if not separator:
+            company, location = employer_location, None
+        second = parts[1] if len(parts) > 1 else ""
+        has_salary = bool(re.search(r"£|\b(?:salary|per (?:hour|day|week|year)|an hour|a year)\b", second, re.I))
+        salary_raw = second if has_salary else None
+        pattern_index = 2 if has_salary else 1
+        pattern = parts[pattern_index] if len(parts) > pattern_index else ""
+        description = clean(" ".join(parts[pattern_index + 1:]))[:6000] or None
+        salary = parse_salary(salary_raw)
+        url = match.group("url").split("?", 1)[0]
+        work_low = f"{pattern} {description or ''}".lower()
+        cards.append(JobCard(
+            source="findajob",
+            source_job_id=url.rstrip("/").rsplit("/", 1)[-1],
+            url=url,
+            apply_url=url,
+            title=clean(match.group("title")),
+            company=clean(company) or None,
+            location_text=clean(location) or None,
+            salary_raw=salary_raw,
+            salary_min=salary[0],
+            salary_max=salary[1],
+            salary_period=salary[2],
+            contract_type=pattern or None,
+            work_from_home=("remote" in work_low or "hybrid" in work_low),
+            description=description,
+            extra={"official_public_listing": True},
+        ))
+        if len(cards) >= limit:
+            break
+    return cards
+
+
+async def fetch(query: SearchQuery, cfg: dict) -> list[JobCard]:
+    """Fetch public GOV.UK listings, with a reader fallback for Akamai blocks."""
+    url = search_url(query.query, query.location)
+    markdown = ""
+    fetched_via = "official"
+    async with html_client() as client:
+        response = await client.get(url)
+        if response.status_code == 200 and "## [" in response.text:
+            markdown = response.text
+    if not markdown:
+        if not cfg.get("reader_fallback", True):
+            raise ProviderError(f"official GOV.UK result page unavailable: {response.status_code}")
+        fetched_via = "public_reader_fallback"
+        # Jina's Cloudflare rules may challenge a synthetic full Chrome UA;
+        # use httpx's honest default identity for this read-through endpoint.
+        global _READER_LAST_REQUEST
+        async with _READER_LOCK:
+            delay = _READER_MIN_INTERVAL_S - (time.monotonic() - _READER_LAST_REQUEST)
+            if delay > 0:
+                await asyncio.sleep(delay)
+            async with httpx.AsyncClient(
+                headers={"Accept": "application/json"}, follow_redirects=True, timeout=30
+            ) as client:
+                response = await client.get(f"{READER_BASE}{url}")
+                _READER_LAST_REQUEST = time.monotonic()
+                if response.status_code != 200:
+                    raise ProviderError(f"GOV.UK reader fallback HTTP {response.status_code}")
+                payload = response.json()
+                markdown = str((payload.get("data") or {}).get("content") or "")
+    cards = parse_reader_markdown(markdown, query.limit)
+    terms = query_terms(query.query)
+    relevant = [
+        card for card in cards
+        if not terms or any(term in f"{card.title} {card.description or ''}".lower() for term in terms)
+    ]
+    for card in relevant:
+        card.extra["fetched_via"] = fetched_via
+        card.extra["search_url"] = url
+    return relevant[:query.limit]
 
 
 def parse_card(context: str, url: str | None = None) -> dict:

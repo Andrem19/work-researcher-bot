@@ -37,7 +37,8 @@ DEFAULTS: dict = {
         "adzuna": {"enabled": True, "app_id": "", "app_key": ""},
         "jooble": {"enabled": True, "api_key": ""},
         "earthworks": {"enabled": True, "uk_only": True},
-        "findajob": {"enabled": False, "browser_only": True},
+        "findajob": {"enabled": True, "reader_fallback": True},
+        "civil_service": {"enabled": True},
     },
     "drive": {
         "enabled": True, "folder_url": "", "folder_id": "", "include_names": [],

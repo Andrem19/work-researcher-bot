@@ -206,7 +206,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
             cvs = await db.count_rows(conn, "cvs")
             searches = await db.count_rows(conn, "searches")
         providers = {}
-        for name in ("totaljobs", "reed", "adzuna", "jooble", "earthworks", "findajob"):
+        for name in ("totaljobs", "reed", "adzuna", "jooble", "earthworks", "findajob", "civil_service"):
             key_ok = True
             if name == "adzuna":
                 key_ok = bool(settings.secret("adzuna", "app_id")
@@ -216,7 +216,7 @@ def _register_tools(mcp: MCPServer, settings: Settings) -> None:
             providers[name] = {
                 "enabled": settings.provider_enabled(name),
                 "credentials": key_ok,
-                "note": "" if key_ok or name in ("totaljobs", "earthworks", "findajob")
+                "note": "" if key_ok or name in ("totaljobs", "earthworks", "findajob", "civil_service")
                 else "add key in config.toml (SETUP.md); Reed falls back to HTML",
             }
         try:

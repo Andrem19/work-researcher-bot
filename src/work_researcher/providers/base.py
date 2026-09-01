@@ -91,7 +91,7 @@ class SearchQuery(dict):
 
     @property
     def limit(self) -> int:
-        return int(self.get("limit") or 25)
+        return int(self.get("limit") or self.get("limit_per_source") or 25)
 
     @property
     def alt_queries(self) -> list[str]:

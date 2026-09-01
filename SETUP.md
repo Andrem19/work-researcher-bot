@@ -40,6 +40,11 @@ uv run work-researcher run-once --dry-run
 `run-once --dry-run` still performs live Drive, providers and GLM calls, but
 does not send Telegram messages or mark jobs as delivered.
 
+The keyless production sources are Totaljobs, Reed HTML, Earthworks, GOV.UK
+Find a job and the official Civil Service Careers Government Digital and Data
+feed. Adzuna and Jooble remain enabled but report a visible credential warning
+until their optional keys are configured.
+
 ## 3. Server layout
 
 ```text

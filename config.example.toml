@@ -72,5 +72,8 @@ enabled = true
 uk_only = true
 
 [providers.findajob]
-enabled = false
-browser_only = true
+enabled = true
+reader_fallback = true
+
+[providers.civil_service]
+enabled = true

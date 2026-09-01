@@ -21,23 +21,32 @@ def _value(value) -> str:
 
 def render_report(jobs: list[dict], provider_health: list[dict], cv_sync: dict, run_time: datetime) -> list[str]:
     ok_sources = [x["provider"] for x in provider_health if x.get("ok")]
-    failed = [f"{x['provider']}: {x.get('error', 'error')}" for x in provider_health if not x.get("ok")]
+    warnings = [
+        f"{x['provider']}: {x.get('error', 'error')}"
+        for x in provider_health if x.get("error")
+    ]
     header = (
         f"<b>Вечерний поиск вакансий — {run_time:%d.%m.%Y}</b>\n"
-        f"Найдено подходящих новых вакансий: <b>{len(jobs)}</b>\n"
+        f"Новых вакансий после жёстких фильтров: <b>{len(jobs)}</b>\n"
         f"CV обновлены из Drive: <b>{len(cv_sync.get('files', []))}</b>\n"
         f"Источники: {_value(ok_sources)}"
     )
-    if failed:
-        header += f"\n⚠️ Ошибки источников: {_value(failed)}"
+    if warnings:
+        header += f"\n⚠️ Ограничения источников: {_value(warnings)}"
     messages = [header]
     for index, job in enumerate(jobs, 1):
         url = html.escape(job.get("url") or "", quote=True)
         title = html.escape(job.get("title") or "Без названия")
         title_line = f'<a href="{url}">{title}</a>' if url else title
         salary = job.get("salary_raw") or "не указана"
+        tier = {
+            "strong": "✅ Сильная рекомендация модели",
+            "review": "🟡 Прошла фильтры — стоит рассмотреть",
+            "fallback": "🟠 Прошла фильтры — решение оставлено вам",
+        }.get(job.get("review_tier"), "🟡 Прошла фильтры — стоит рассмотреть")
         block = (
             f"<b>{index}. {title_line}</b>\n"
+            f"<b>{tier}</b>\n"
             f"🏢 <b>Работодатель:</b> {_value(job.get('company'))} — прямой ({_value(job.get('direct_employer_reason'))})\n"
             f"🧭 <b>Линия:</b> {_value(job.get('path_label'))} | <b>Score:</b> {_value(job.get('overall_score'))}/100\n"
             f"📍 <b>Место:</b> {_value(job.get('location_text'))} | <b>Формат:</b> {_value(job.get('work_mode'))}\n"
@@ -48,6 +57,7 @@ def render_report(jobs: list[dict], provider_health: list[dict], cv_sync: dict, 
             f"⚙️ <b>Особые условия:</b> {_value(job.get('special_conditions'))}\n"
             f"✅ <b>Что подходит в CV:</b> {_value(job.get('cv_strengths'))}\n"
             f"⚠️ <b>Пробелы/риски:</b> {_value(job.get('cv_gaps'))}\n"
+            f"🚩 <b>Замечания модели:</b> {_value(job.get('rejection_reasons'))}\n"
             f"📄 <b>CV:</b> {_value(job.get('cv_filename'))}\n"
             f"🔎 <b>Источник:</b> {_value(job.get('source'))}"
         )

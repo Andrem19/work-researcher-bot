@@ -13,10 +13,15 @@ STOPWORDS = {
 }
 
 _SAL_PATTERNS = [
+    # £45-50k
+    (
+        re.compile(r"£\s*([\d,.]+)\s*(?:-|–|to)\s*£?\s*([\d,.]+)\s*k\b", re.I),
+        "range_k",
+    ),
     # £30,000 - £40,000 per annum | £300 - £400 per day
     (
         re.compile(
-            r"£?\s*([\d,]+(?:\.\d+)?)\s*(?:-|–|to)\s*£?\s*([\d,]+(?:\.\d+)?)\s*(?:/|per\s+)?(annum|year|yearly|month|monthly|week|weekly|day|daily|hour|hr|hourly)",
+            r"£?\s*([\d,]+(?:\.\d+)?)\s*(?:-|–|to)\s*£?\s*([\d,]+(?:\.\d+)?)\s*(?:/|per\s+|a\s+)?(annum|year|yearly|month|monthly|week|weekly|day|daily|hour|hr|hourly)",
             re.I,
         ),
         "range",
@@ -29,6 +34,8 @@ _SAL_PATTERNS = [
         ),
         "single",
     ),
+    # £31,000 (period omitted on compact official listings)
+    (re.compile(r"£\s*([\d,]+(?:\.\d+)?)\b", re.I), "currency_single"),
 ]
 
 _PERIOD_CANON = {
@@ -76,14 +83,20 @@ def parse_salary(raw: str | None) -> tuple[float | None, float | None, str | Non
         m = pattern.search(text)
         if not m:
             continue
-        if kind == "range":
+        if kind in {"range", "range_k"}:
             lo = float(m.group(1).replace(",", ""))
             hi = float(m.group(2).replace(",", ""))
-            period = _PERIOD_CANON.get((m.group(3) or "").lower())
+            if kind == "range_k":
+                lo, hi, period = lo * 1000, hi * 1000, "year"
+            else:
+                period = _PERIOD_CANON.get((m.group(3) or "").lower())
         else:
             lo = float(m.group(1).replace(",", ""))
             hi = None
-            period = _PERIOD_CANON.get((m.group(2) or "").lower())
+            period = (
+                _PERIOD_CANON.get((m.group(2) or "").lower())
+                if kind == "single" else "year"
+            )
         # "£300 per day" vs "£300,000" heuristics: tiny numbers imply hour/day rates
         if period == "year" and lo and lo < 3000:
             period = "week" if lo < 400 else "month"

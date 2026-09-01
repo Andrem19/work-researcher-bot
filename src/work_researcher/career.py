@@ -39,6 +39,10 @@ def location_allowed(card: JobCard) -> tuple[bool, str]:
 
 def entry_allowed(card: JobCard) -> tuple[bool, str]:
     text = f"{card.title or ''} {card.description or ''}"
+    if ENTRY_RE.search(card.title or ""):
+        if YEARS_RE.search(text):
+            return False, "entry-labelled role still requires at least 3 years of experience"
+        return True, "explicit entry-level signal"
     if SENIOR_RE.search(card.title or ""):
         return False, "senior title"
     if YEARS_RE.search(text):

@@ -53,7 +53,7 @@ async def cmd_doctor(args) -> int:
         "directory": str(settings.cv_dir),
         "instruction": "Copy CV files here and run work-researcher index-cvs",
     }
-    for name in ("totaljobs", "reed", "adzuna", "jooble", "earthworks", "findajob"):
+    for name in ("totaljobs", "reed", "adzuna", "jooble", "earthworks", "findajob", "civil_service"):
         report[f"provider.{name}"] = {
             "enabled": settings.provider_enabled(name),
             **({"key": bool(settings.secret(name, "api_key"))}
