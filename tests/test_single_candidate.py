@@ -8,6 +8,7 @@ from work_researcher.career import deterministic_assessment, location_allowed
 from work_researcher.config import load_settings
 from work_researcher.domain import JobCard
 from work_researcher.drive import _select
+from work_researcher.requirements import extract_requirements
 from work_researcher.server import create_server
 from work_researcher.telegram import render_report
 
@@ -86,3 +87,11 @@ async def test_report_delivery_state_is_idempotent(tmp_path: Path) -> None:
         await db.mark_report_delivered(conn, ["job-a", "job-b"], [11, 12, 13])
     async with db.connect(database) as conn:
         assert await db.delivered_hashes(conn) == {"job-a", "job-b"}
+
+
+def test_proven_experience_without_years_does_not_parse_text_as_integer() -> None:
+    requirements = extract_requirements(
+        "Proven experience in data capture and analysis  Expert in the use of GIS"
+    )
+    assert requirements["experience_years"] is None
+    assert requirements["hard"][0]["type"] == "experience"

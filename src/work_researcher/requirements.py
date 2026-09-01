@@ -48,7 +48,7 @@ QUAL_PATTERNS = [
     (re.compile(r"\b(SC|DV|CTC|security\s+clearance|DBS\s+(?:check|certified))\b",
                 re.I), "clearance"),
     # Experience: "X years of experience in Y"
-    (re.compile(r"(\d+)\+?\s*years?\s+(?:of\s+)?experience\s+(?:in|of|with)\s+"
+    (re.compile(r"(?P<years>\d+)\+?\s*years?\s+(?:of\s+)?experience\s+(?:in|of|with)\s+"
                 r"([a-zA-Z\s,]{3,40})", re.I), "experience"),
     # "Proven experience in X"
     (re.compile(r"proven\s+experience\s+(?:in|of|with)\s+([a-zA-Z\s,]{3,40})",
@@ -91,7 +91,8 @@ def extract_requirements(description: str | None) -> dict:
                 continue
             value = m.group(0).strip()
             if rtype == "experience":
-                years = int(m.group(1)) if m.lastindex and m.group(1) else None
+                years_text = m.groupdict().get("years")
+                years = int(years_text) if years_text else None
                 if years and (exp_years is None or years > exp_years):
                     exp_years = years
                 value = m.group(0).strip()
