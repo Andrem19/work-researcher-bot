@@ -92,6 +92,7 @@ def test_weekly_market_cli_and_dashboard_contract() -> None:
     args = build_parser().parse_args(["weekly-market"])
     assert args.command == "weekly-market"
     dashboard = Path("dashboard/index.html").read_text(encoding="utf-8")
+    assert '<base href="/jobs/">' in dashboard
     assert "data-level" in dashboard
     assert "High-paying £80k+" in dashboard
     assert "data.json" in dashboard
