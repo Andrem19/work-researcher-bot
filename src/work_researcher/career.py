@@ -225,6 +225,8 @@ def vacancy_status(card: JobCard, *, today: date | None = None, now: datetime | 
     deadline_text = chosen["raw"] if chosen else None
     deadline = chosen["date"] if chosen else None
     cutoff = _deadline_instant(deadline_text, deadline) if deadline else None
+    if cutoff:
+        deadline = cutoff.astimezone(ZoneInfo("Europe/London")).date()
     explicitly_closed = bool(CLOSED_RE.search(description) or card.extra.get("vacancy_closed"))
     expired = explicitly_closed or (deadline is not None and deadline < current_date)
     if cutoff and today is None:

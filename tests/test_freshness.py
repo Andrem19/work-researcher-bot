@@ -40,6 +40,14 @@ def test_date_only_is_not_misread_as_time_and_midnight_uses_uk_day():
     assert vacancy_status(job, now=datetime(2026, 9, 2, 23, 1, tzinfo=UTC))["closed"]
 
 
+def test_iso_utc_cutoff_on_following_uk_day_is_not_rejected_early():
+    job = card(extra={"validThrough": "2026-09-02T23:30:00Z"})
+    status = vacancy_status(job, now=datetime(2026, 9, 2, 23, 1, tzinfo=UTC))
+    assert status["deadline"] == "2026-09-03"
+    assert not status["closed"]
+    assert vacancy_status(job, now=datetime(2026, 9, 2, 23, 30, tzinfo=UTC))["closed"]
+
+
 def test_earliest_deadline_and_primary_overrides_board():
     job = card(extra={"deadline_evidence": [
         {"raw": "11 Sept 2026", "kind": "listing"},
