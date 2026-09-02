@@ -48,8 +48,7 @@ async def fetch(query: SearchQuery, cfg: dict) -> list[JobCard]:
             salary_raw=clean(j.get("salary")) or None,
             salary_min=sal[0], salary_max=sal[1], salary_period=sal[2],
             description=clean(j.get("snippet"))[:600],
-            posted_at=_dt(j.get("updated")),
-            extra={"origin": j.get("source")},
+            extra={"origin": j.get("source"), "source_updated_at": j.get("updated")},
         ))
         if len(cards) >= query.limit:
             break

@@ -6,6 +6,7 @@ import html
 from collections import Counter
 from collections.abc import Iterable
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -42,7 +43,42 @@ def _source_name(value: str | None) -> str:
         "earthworks": "Earthworks",
         "adzuna": "Adzuna",
         "jooble": "Jooble",
+        "www.civilservicejobs.service.gov.uk": "Civil Service Jobs",
     }.get(value or "", value or "не указано")
+
+
+def _date_text(value: str | None, *, show_time: bool = False) -> str:
+    if not value:
+        return "не указано"
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo:
+            parsed = parsed.astimezone(ZoneInfo("Europe/London"))
+        return parsed.strftime("%d.%m.%Y, %H:%M UK" if show_time else "%d.%m.%Y")
+    except ValueError:
+        return value
+
+
+def _publication_line(job: dict) -> str:
+    text = _date_text(job.get("posted_at"))
+    if job.get("publication_precision") == "approximate":
+        text = "примерно " + text
+    if job.get("publication_year_inferred"):
+        text += " (год в источнике не указан)"
+    line = f"🗓 <b>Опубликовано:</b> {_value(text)}"
+    url = job.get("publication_url")
+    if url:
+        label = _source_name(job.get("publication_source"))
+        line += f' — <a href="{html.escape(url, quote=True)}">{_value(label)}</a>'
+        line += " (одна из первых дат)" if job.get("publication_tied") else " (ранняя из найденных)"
+    line += "\n"
+    if job.get("publication_archived"):
+        line += "⚠️ Ранняя публикация оставлена как источник даты; ссылка для подачи ведёт на другую копию.\n"
+    if job.get("publication_date_conflict"):
+        line += "⚠️ Источник показывает разные даты публикации; приведена самая ранняя.\n"
+    if job.get("publication_incomplete") and job.get("posted_at"):
+        line += "Даты известны не для всех найденных источников.\n"
+    return line
 
 
 def render_report(
@@ -94,7 +130,9 @@ def render_report(
             f"🧭 <b>Линия:</b> {_value(job.get('path_label'))} | <b>Score:</b> {_value(job.get('overall_score'))}/100\n"
             f"📍 <b>Место:</b> {_value(job.get('location_text'))} | <b>Формат:</b> {_value(_work_mode(job.get('work_mode')))}\n"
             f"💷 <b>Зарплата:</b> {_value(salary, max_chars=100)}\n"
-            + f"⏳ <b>Срок {'работодателя' if job.get('deadline_kind') == 'employer' else 'по объявлению'}:</b> {_value(job.get('deadline_at') or job.get('deadline'))}"
+            + _publication_line(job)
+            + f"⏳ <b>Дедлайн:</b> {_value(_date_text(job.get('deadline_at') or job.get('deadline'), show_time=bool(job.get('deadline_at'))))}"
+            + (" (работодатель)" if job.get("deadline_kind") == "employer" else " (по объявлению)" if job.get("deadline") else "")
             + (" (год выведен из текущей даты)" if job.get("deadline_year_inferred") else "")
             + "\n"
         )

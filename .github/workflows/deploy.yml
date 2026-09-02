@@ -30,6 +30,7 @@ jobs:
           src/work_researcher/llm.py
           src/work_researcher/career.py
           src/work_researcher/freshness.py
+          src/work_researcher/publication.py
           src/work_researcher/market.py
           src/work_researcher/telegram.py
           src/work_researcher/config.py
@@ -45,6 +46,7 @@ jobs:
           tests/test_market.py
           tests/test_drive.py
           tests/test_freshness.py
+          tests/test_publication.py
       - run: uv run pytest -q
 
   deploy:

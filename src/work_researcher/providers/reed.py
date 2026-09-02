@@ -69,7 +69,7 @@ async def fetch_api(query: SearchQuery, api_key: str) -> list[JobCard]:
             contract_type=j.get("contractType"),
             description=clean(j.get("jobDescription"))[:800],
             posted_at=_dt(j.get("date")),
-            extra={"api": True, "recruiter": j.get("recruiterName")},
+            extra={"api": True, "recruiter": j.get("recruiterName"), "publication_raw": j.get("date")},
         ))
         if len(cards) >= query.limit:
             break
@@ -132,7 +132,7 @@ def parse_html(html: str, query: SearchQuery) -> list[JobCard]:
             salary_raw=salary_raw,
             salary_min=sal[0], salary_max=sal[1], salary_period=sal[2],
             posted_at=_posted_from_card(posted_by or clean(art.text())),
-            extra={"easy_apply": bool(art.css_first(
+            extra={"publication_raw": posted_by.split(" by ")[0], "easy_apply": bool(art.css_first(
                 '[data-qa="badge-1-easyApply"], [data-qa*="easyApply"]'))},
         ))
         if len(cards) >= query.limit:

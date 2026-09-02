@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 import httpx
 from selectolax.parser import HTMLParser
 
-from . import dedup
+from . import dedup, publication
 from . import persistence as db
 from .career import classify_career_path, deterministic_assessment, vacancy_status
 from .config import Settings, ensure_dirs
@@ -257,6 +257,7 @@ def _build_ranked_jobs(assessment_map: dict[str, dict], candidate_map: dict, set
             "deadline_evidence": card.extra.get("deadline_evidence", []),
             "contract_type": card.contract_type,
             "posted_at": card.posted_at.isoformat() if card.posted_at else None,
+            **publication.report_fields(card),
             "description_evidence": (card.description or "")[:1200],
             "glm_recommended": glm_recommended,
             "glm_direct_employer": glm_direct,
@@ -416,12 +417,12 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
     tagged_cards, provider_health = await _collect(settings)
     logger.info("Provider collection completed: %d tagged cards", len(tagged_cards))
 
-    # Collapse duplicate listings while retaining every career-path match.
+    # Keep all platform URLs before choosing the richer card for assessment.
+    observations = publication.unique_cards([card for _, card in tagged_cards])
     by_hash: dict[str, dict] = {}
-    for path_id, card in tagged_cards:
+    for card in observations:
         key = job_hash(card.title, card.company, card.location_text, card.salary_min)
-        record = by_hash.setdefault(key, {"card": card, "paths": set()})
-        record["paths"].add(path_id)
+        record = by_hash.setdefault(key, {"card": card})
         if len(card.description or "") > len(record["card"].description or ""):
             record["card"] = card
     await _enrich_all(list(by_hash.values()))
@@ -446,11 +447,21 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
     # Always inspect full adverts/application links, even with a long search
     # description. Check all eligible cards before capping so an expired top
     # result can be replaced by the next live candidate.
-    freshness = await verify_cards([item[1] for item in candidates])
+    eligible_keys = {item[0] for item in candidates}
+    candidate_cards = [item[1] for item in candidates]
+    related = [card for card in observations
+               if job_hash(card.title, card.company, card.location_text, card.salary_min) in eligible_keys
+               or any(publication.same_vacancy(card, candidate) for candidate in candidate_cards)]
+    async with db.connect(settings.db_path) as conn:
+        history = await db.publication_history(conn, candidate_cards)
+    related.extend(old for old in history if any(publication.same_vacancy(old, card) for card in candidate_cards))
+    verification_cards = publication.unique_cards(related)
+    await verify_cards(verification_cards)
     freshness_excluded = []
     verified = []
-    for item, status in zip(candidates, freshness, strict=True):
+    for item in candidates:
         key, card, base = item
+        status = vacancy_status(card)
         if not status["reportable"]:
             freshness_excluded.append({
                 "job_key": key, "title": card.title, "url": card.url, **status,
@@ -459,12 +470,14 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
             })
         else:
             base.update(status)
+            publication.attach_sources(card, verification_cards)
             verified.append(item)
     candidates = verified
     logger.info("Freshness check: %d retained, %d excluded", len(candidates), len(freshness_excluded))
 
     pool_cards = [record["card"] for record in by_hash.values()]
     async with db.connect(settings.db_path) as conn:
+        await db.save_publications(conn, publication.unique_cards(observations + verification_cards))
         pool = await dedup.load_pool(conn)
         resolution, merged = dedup.resolution_map(pool_cards, pool)
         await db.upsert_jobs(conn, pool_cards, resolution)
@@ -565,9 +578,13 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
     # before delivery; GLM opinions/fallbacks cannot revive a closed vacancy.
     fresh_jobs = []
     for job in jobs:
-        status = vacancy_status(candidate_map[job["job_key"]][0])
+        card = candidate_map[job["job_key"]][0]
+        status = vacancy_status(card)
         if status["reportable"]:
             job.update(status)
+            publication.attach_sources(card, verification_cards)
+            job.update({"url": card.apply_url or card.url, "source": card.source,
+                        **publication.report_fields(card)})
             fresh_jobs.append(job)
         else:
             freshness_excluded.append({"job_key": job["job_key"], "title": job["title"], **status})

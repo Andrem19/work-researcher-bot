@@ -136,5 +136,5 @@ def test_model_cannot_revive_expired_or_overwrite_deadline():
 def test_compact_card_also_shows_deadline_and_uncertainty():
     jobs = [{"title": "Example", "deadline": "2026-09-18", "application_check": "unverified"}]
     text = render_report(jobs, [], {}, datetime.now(UTC), detailed_jobs=0)[1]
-    assert "2026-09-18" in text
+    assert "18.09.2026" in text
     assert "не подтверждён" in text

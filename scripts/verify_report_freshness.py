@@ -7,6 +7,7 @@ from pathlib import Path
 
 from work_researcher.domain import JobCard
 from work_researcher.freshness import verify_cards
+from work_researcher.publication import attach_sources, report_fields
 
 
 async def main():
@@ -19,8 +20,9 @@ async def main():
              for job in report["jobs"]]
     statuses = await verify_cards(cards)
     for card, status in zip(cards, statuses, strict=True):
+        attach_sources(card, cards)
         print(json.dumps({"title": card.title, "company": card.company, "url": card.url,
-                          **status, "evidence": card.extra}, ensure_ascii=False))
+                          **status, **report_fields(card), "evidence": card.extra}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

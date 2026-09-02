@@ -16,6 +16,7 @@ from typing import Any
 import aiosqlite
 
 from .domain import JobCard
+from .publication import combine_evidence, evidence, match_key, normalize_url
 from .textutils import annualise, job_hash, now_iso, parse_dt
 
 SCHEMA = """
@@ -121,6 +122,16 @@ CREATE TABLE IF NOT EXISTS report_deliveries (
     delivered_at TEXT NOT NULL,
     telegram_message_ids TEXT
 );
+CREATE TABLE IF NOT EXISTS vacancy_publications (
+    source TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    match_key TEXT NOT NULL,
+    card_json TEXT NOT NULL,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    PRIMARY KEY (source, source_url)
+);
+CREATE INDEX IF NOT EXISTS idx_publications_match ON vacancy_publications(match_key);
 CREATE INDEX IF NOT EXISTS idx_jobs_posted ON jobs(posted_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_hash ON jobs(content_hash);
 CREATE INDEX IF NOT EXISTS idx_apps_job ON applications(job_id);
@@ -160,6 +171,49 @@ class connect:
 async def init_db(db_path: Path) -> None:
     async with connect(db_path):
         pass
+
+
+async def save_publications(conn: aiosqlite.Connection, cards: list[JobCard]) -> None:
+    """Keep per-URL evidence, independently of legacy fuzzy/canonical job rows."""
+    for card in cards:
+        if not card.url:
+            continue
+        url = normalize_url(card.url)
+        bucket = match_key(card)
+        copy = card.model_copy(deep=True)
+        items = evidence(copy)
+        cur = await conn.execute(
+            "SELECT match_key, card_json FROM vacancy_publications WHERE source=? AND source_url=?",
+            (card.source, url),
+        )
+        old = await cur.fetchone()
+        if old and old["match_key"] == bucket:
+            previous = JobCard.model_validate_json(old["card_json"])
+            for item in evidence(previous):
+                if item not in items:
+                    items.append(item)
+        copy.extra["publication_evidence"] = combine_evidence(items)
+        # No recursive sources or CVs in this per-advert store.
+        copy.extra.pop("publication_sources", None)
+        copy.description = (copy.description or "")[:12000]
+        await conn.execute(
+            """INSERT INTO vacancy_publications VALUES (?,?,?,?,?,?)
+               ON CONFLICT(source,source_url) DO UPDATE SET match_key=excluded.match_key,
+               card_json=excluded.card_json,last_seen=excluded.last_seen""",
+            (card.source, url, bucket, copy.model_dump_json(), now_iso(), now_iso()),
+        )
+
+
+async def publication_history(conn: aiosqlite.Connection, cards: list[JobCard]) -> list[JobCard]:
+    keys = sorted({match_key(card) for card in cards if card.title and card.company})
+    if not keys:
+        return []
+    marks = ",".join("?" for _ in keys)
+    cur = await conn.execute(
+        f"SELECT card_json FROM vacancy_publications WHERE match_key IN ({marks}) ORDER BY last_seen DESC",
+        keys,
+    )
+    return [JobCard.model_validate_json(row[0]) for row in await cur.fetchall()]
 
 
 # ------------------------------------------------------ report delivery ----

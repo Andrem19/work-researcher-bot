@@ -119,7 +119,7 @@ def parse_jobs(html: str, query: SearchQuery) -> list[JobCard]:
             contract_type=contract,
             description=teaser,
             posted_at=posted,
-            extra={"fetched_via": "html", "timeago": timeago},
+            extra={"fetched_via": "html", "timeago": timeago, "publication_raw": timeago},
         ))
         if len(cards) >= query.limit:
             break
