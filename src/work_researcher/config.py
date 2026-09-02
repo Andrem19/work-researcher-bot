@@ -52,7 +52,9 @@ DEFAULTS: dict = {
     "telegram": {"enabled": True, "chat_id": "", "parse_mode": "HTML", "disable_web_page_preview": True},
     "report": {
         "max_jobs": 10, "max_per_path": 10, "detailed_jobs": 5,
-        "pre_llm_max_per_path": 15, "include_seen": False,
+        "pre_llm_max_per_path": 15, "pre_llm_max_per_source_path": 8,
+        "diverse_max_per_path": 4, "diverse_max_per_source": 5,
+        "include_seen": False,
     },
     "market": {
         "window_days": 90, "limit_per_source": 100, "max_per_slice": 250,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+from collections import Counter
 from collections.abc import Iterable
 from datetime import datetime
 
@@ -11,12 +12,37 @@ import httpx
 from .config import Settings
 
 
-def _value(value) -> str:
+def _value(value, *, max_items: int | None = None, max_chars: int | None = None) -> str:
     if value in (None, "", []):
         return "не указано"
     if isinstance(value, list):
-        return "; ".join(html.escape(str(x)) for x in value) or "не указано"
-    return html.escape(str(value))
+        values = value[:max_items] if max_items is not None else value
+        text = "; ".join(str(x) for x in values) or "не указано"
+    else:
+        text = str(value)
+    if max_chars is not None and len(text) > max_chars:
+        text = text[: max_chars - 1].rstrip() + "…"
+    return html.escape(text)
+
+
+def _work_mode(value: str | None) -> str:
+    return {
+        "remote": "remote",
+        "hybrid": "гибрид",
+        "on_site": "офис",
+    }.get(value or "", value or "не указано")
+
+
+def _source_name(value: str | None) -> str:
+    return {
+        "findajob": "Find a Job (GOV.UK)",
+        "civil_service": "Civil Service Careers",
+        "reed": "Reed",
+        "totaljobs": "Totaljobs",
+        "earthworks": "Earthworks",
+        "adzuna": "Adzuna",
+        "jooble": "Jooble",
+    }.get(value or "", value or "не указано")
 
 
 def render_report(
@@ -27,7 +53,11 @@ def render_report(
     *,
     detailed_jobs: int = 5,
 ) -> list[str]:
-    ok_sources = [x["provider"] for x in provider_health if x.get("ok")]
+    ok_sources = [_source_name(x["provider"]) for x in provider_health if x.get("ok")]
+    result_sources = Counter(_source_name(job.get("source")) for job in jobs)
+    result_source_text = ", ".join(
+        f"{source}: {count}" for source, count in result_sources.items()
+    ) or "нет"
     warnings = [
         f"{x['provider']}: {x.get('error', 'error')}"
         for x in provider_health if x.get("error")
@@ -36,7 +66,8 @@ def render_report(
         f"<b>Вечерний поиск вакансий — {run_time:%d.%m.%Y}</b>\n"
         f"Показано лучших вакансий после жёстких фильтров: <b>{len(jobs)}</b>\n"
         f"CV обновлены из Drive: <b>{len(cv_sync.get('files', []))}</b>\n"
-        f"Источники: {_value(ok_sources)}"
+        f"Источники поиска: {_value(ok_sources)}\n"
+        f"Источники в топе: {_value(result_source_text)}"
     )
     if len(jobs) > detailed_jobs:
         header += (
@@ -61,34 +92,32 @@ def render_report(
             f"<b>{tier}</b>\n"
             f"🏢 <b>Работодатель:</b> {_value(job.get('company'))}\n"
             f"🧭 <b>Линия:</b> {_value(job.get('path_label'))} | <b>Score:</b> {_value(job.get('overall_score'))}/100\n"
-            f"📍 <b>Место:</b> {_value(job.get('location_text'))} | <b>Формат:</b> {_value(job.get('work_mode'))}\n"
-            f"💷 <b>Зарплата:</b> {_value(salary)}\n"
+            f"📍 <b>Место:</b> {_value(job.get('location_text'))} | <b>Формат:</b> {_value(_work_mode(job.get('work_mode')))}\n"
+            f"💷 <b>Зарплата:</b> {_value(salary, max_chars=100)}\n"
         )
         if index <= detailed_jobs:
             block = (
                 common
-                + f"🎯 <b>Почему это место:</b> {_value(job.get('rank_reason_ru'))}\n"
-                + f"🌱 <b>Entry-сигналы:</b> {_value(job.get('entry_evidence'))}\n"
-                + f"📝 <b>Суть:</b> {_value(job.get('summary_ru'))}\n"
+                + f"🎯 <b>Почему в топе:</b> {_value(job.get('rank_reason_ru'), max_chars=220)}\n"
+                + f"📝 <b>Суть:</b> {_value(job.get('summary_ru'), max_chars=300)}\n"
+                + f"🌱 <b>Entry-сигналы:</b> {_value(job.get('entry_evidence'), max_items=3, max_chars=180)}\n"
+                + f"❗ <b>Обязательно:</b> {_value(job.get('mandatory_requirements'), max_items=4, max_chars=260)}\n"
+                + f"+ <b>Желательно:</b> {_value(job.get('desirable_requirements'), max_items=3, max_chars=180)}\n"
+                + f"✅ <b>CV-fit:</b> {_value(job.get('cv_strengths'), max_items=3, max_chars=180)}\n"
+                + f"⚠️ <b>Пробелы:</b> {_value(job.get('cv_gaps'), max_items=3, max_chars=180)}\n"
+                + f"⚙️ <b>Особые условия:</b> {_value(job.get('special_conditions'), max_items=2, max_chars=160)}\n"
                 + f"⏳ <b>Срок подачи:</b> {_value(job.get('deadline'))} | "
                 + f"<b>Срочность:</b> {_value(job.get('deadline_urgency'))}\n"
-                + f"🔐 <b>Прямой работодатель:</b> {_value(job.get('direct_employer_reason'))}\n"
-                + f"❗ <b>Обязательные требования:</b> {_value(job.get('mandatory_requirements'))}\n"
-                + f"<b>Desirable:</b> {_value(job.get('desirable_requirements'))}\n"
-                + f"⚙️ <b>Особые условия:</b> {_value(job.get('special_conditions'))}\n"
-                + f"✅ <b>Что подходит в CV:</b> {_value(job.get('cv_strengths'))}\n"
-                + f"⚠️ <b>Пробелы/риски:</b> {_value(job.get('cv_gaps'))}\n"
-                + f"🚩 <b>Замечания модели:</b> {_value(job.get('rejection_reasons'))}\n"
                 + f"📄 <b>CV:</b> {_value(job.get('cv_filename'))}\n"
-                + f"🔎 <b>Источник:</b> {_value(job.get('source'))}"
+                + f"🔎 <b>Источник:</b> {_value(_source_name(job.get('source')))}"
             )
         else:
             block = (
                 common
-                + f"🎯 <b>Почему в топе:</b> {_value(job.get('rank_reason_ru'))}\n"
-                + f"⚠️ <b>Главный нюанс:</b> {_value(job.get('main_tradeoff_ru'))}\n"
-                + f"🔎 <b>Источник:</b> {_value(job.get('source'))}\n"
-                + "ℹ️ Подробности доступны по ссылке в названии вакансии."  # noqa: RUF001
+                + f"🎯 <b>Почему:</b> {_value(job.get('rank_reason_ru'), max_chars=180)}\n"
+                + f"⚠️ <b>Нюанс:</b> {_value(job.get('main_tradeoff_ru'), max_chars=140)}\n"
+                + f"📄 <b>CV:</b> {_value(job.get('cv_filename'))} | "
+                + f"🔎 <b>Источник:</b> {_value(_source_name(job.get('source')))}"
             )
         if len(block) > 3900:
             block = block[:3850] + "…"

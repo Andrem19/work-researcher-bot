@@ -4,8 +4,19 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from work_researcher import persistence as db
-from work_researcher.bot import _apply_global_ranking, _build_ranked_jobs, _report_signature
-from work_researcher.career import deterministic_assessment, location_allowed, vacancy_status
+from work_researcher.bot import (
+    _apply_global_ranking,
+    _assign_cvs,
+    _build_ranked_jobs,
+    _report_signature,
+    _select_report_jobs,
+)
+from work_researcher.career import (
+    classify_career_path,
+    deterministic_assessment,
+    location_allowed,
+    vacancy_status,
+)
 from work_researcher.config import load_settings
 from work_researcher.domain import JobCard
 from work_researcher.drive import _select
@@ -109,12 +120,12 @@ def test_telegram_uses_five_detailed_then_compact_cards() -> None:
         detailed_jobs=5,
     )
     assert len(messages) == 7
-    assert "Обязательные требования" in messages[5]
-    assert "Обязательные требования" not in messages[6]
+    assert "Обязательно" in messages[5]
+    assert "Обязательно" not in messages[6]
     assert "Суть" not in messages[6]
-    assert "Почему в топе" in messages[6]
-    assert "Главный нюанс" in messages[6]
-    assert "Подробности доступны по ссылке" in messages[6]
+    assert "Почему" in messages[6]
+    assert "Нюанс" in messages[6]
+    assert "CV:" in messages[6]
     assert "первые <b>5</b> подробно" in messages[0]
 
 
@@ -165,6 +176,107 @@ def test_report_signature_collapses_regional_copies_of_one_advert() -> None:
     different_role = {**blackpool, "title": "Data Engineer"}
     assert _report_signature(blackpool) == _report_signature(manchester)
     assert _report_signature(blackpool) != _report_signature(different_role)
+
+
+def test_route_is_classified_from_vacancy_not_discovery_query() -> None:
+    engineer = JobCard(
+        source="test", title="Data Engineer", company="DWP Digital",
+        description="Build and validate ETL data pipelines in Azure Data Factory.",
+    )
+    analyst = JobCard(
+        source="test", title="Data Analyst", company="Acme",
+        description="Create Power BI dashboards and analyse data with SQL.",
+    )
+    geospatial = JobCard(
+        source="test", title="Graduate GIS Analyst", company="MapCo",
+        description="Use ArcGIS, QGIS and spatial data.",
+    )
+    software = JobCard(
+        source="test", title="Junior Python Developer", company="AppCo",
+        description="Build backend REST APIs with FastAPI and unit tests.",
+    )
+    assert classify_career_path(engineer)[0] == "data_engineering"
+    assert classify_career_path(analyst)[0] == "analytics"
+    assert classify_career_path(geospatial)[0] == "geospatial_data"
+    assert classify_career_path(software)[0] == "software_data_platform"
+
+
+def test_off_route_jobs_do_not_receive_a_career_label() -> None:
+    network = JobCard(
+        source="test", title="Network Operations Engineer",
+        description="Monitor routers, switches and telecoms incidents.",
+    )
+    administrator = JobCard(
+        source="test", title="Data, Workflow and Secretarial Administrator",
+        description="Diary management, typing and general office administration.",
+    )
+    assert classify_career_path(network)[0] is None
+    assert classify_career_path(administrator)[0] is None
+
+
+def test_report_selection_prefers_source_and_route_diversity_then_fills() -> None:
+    jobs = [
+        {
+            "job_key": str(index), "title": f"Role {index}", "company": f"Co {index}",
+            "salary_raw": str(30000 + index), "source": source, "path_id": path,
+        }
+        for index, (source, path) in enumerate([
+            ("findajob", "analytics"),
+            ("findajob", "analytics"),
+            ("findajob", "analytics"),
+            ("reed", "data_engineering"),
+            ("civil_service", "software_data_platform"),
+        ])
+    ]
+    selected = _select_report_jobs(
+        jobs, max_jobs=4, diverse_max_per_path=2, diverse_max_per_source=2
+    )
+    assert [job["job_key"] for job in selected] == ["0", "1", "3", "4"]
+
+
+def test_report_selection_collapses_board_and_employer_copy() -> None:
+    common = {
+        "salary_raw": "£25,760 to £27,476 a year", "source": "findajob",
+        "path_id": "analytics", "location_text": "Preston",
+    }
+    jobs = [
+        {
+            **common, "job_key": "board", "title": "Compliance and Assurance Analyst",
+            "company": "NHS Jobs",
+        },
+        {
+            **common, "job_key": "employer",
+            "title": "Compliance and Assurance Analyst | Lancashire Teaching Hospitals",
+            "company": "Lancashire Teaching Hospitals NHS Foundation Trust",
+        },
+    ]
+    selected = _select_report_jobs(
+        jobs, max_jobs=10, diverse_max_per_path=4, diverse_max_per_source=5
+    )
+    assert [job["job_key"] for job in selected] == ["board"]
+
+
+def test_cv_assignment_uses_the_four_route_specific_filenames(tmp_path: Path) -> None:
+    filenames = [
+        "Andrew_CV_Data_Analytics.docx",
+        "Andrew_CV_Data_Engineering.docx",
+        "Andrew_CV_Geospatial_Data_Engineering.docx",
+        "Andrew_CV_Software_Engineering.docx",
+    ]
+    for filename in filenames:
+        (tmp_path / filename).write_bytes(b"placeholder")
+    settings = load_settings(Path("missing-test-config.toml"))
+    settings.cv_dir = tmp_path
+    with patch("work_researcher.bot.extract_text", return_value=""):
+        mapping = _assign_cvs(settings)
+    assert mapping["analytics"]["filename"] == "Andrew_CV_Data_Analytics.docx"
+    assert mapping["data_engineering"]["filename"] == "Andrew_CV_Data_Engineering.docx"
+    assert mapping["geospatial_data"]["filename"] == (
+        "Andrew_CV_Geospatial_Data_Engineering.docx"
+    )
+    assert mapping["software_data_platform"]["filename"] == (
+        "Andrew_CV_Software_Engineering.docx"
+    )
 
 
 def test_explicitly_closed_and_expired_vacancies_are_rejected() -> None:

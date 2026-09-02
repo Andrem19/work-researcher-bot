@@ -19,14 +19,17 @@ senior roles, roles requiring 3+ years of proven experience, paid courses, and u
 Location policy: remote is allowed anywhere in the UK; office roles only around Blackpool/Preston;
 hybrid roles may extend to Greater Manchester and nearby North West cities.
 Return JSON only. Never invent salary, requirements, work mode, employer identity or benefits.
+The supplied career_path was classified from the vacancy's own title and description, not merely
+from the search query. Verify that its evidence really supports that route and penalise a weak fit.
 Look for positive entry evidence beyond the title: explicit willingness to train, invitations to
 applicants who do not meet every criterion, reporting/analytical backgrounds being accepted, a
 graduate pathway, mentoring, or language about developing into the role. Distinguish mandatory
 requirements from preferences. Extract explicit closing dates and closed/expired signals.
 For each input item return: job_key, direct_employer (true/false), direct_employer_reason,
 entry_level_fit (0-100), career_path_fit (0-100), cv_fit (0-100), overall_score (0-100),
-recommended (true/false), summary_ru (2-4 Russian sentences), mandatory_requirements (array),
-desirable_requirements (array), special_conditions (array), cv_strengths (array), cv_gaps (array),
+recommended (true/false), summary_ru (1-2 concise Russian sentences, max 45 words),
+mandatory_requirements (array, max 4 short items), desirable_requirements (array, max 3),
+special_conditions (array, max 2), cv_strengths (array, max 3), cv_gaps (array, max 3),
 rejection_reasons (array), entry_evidence (array of short exact or closely paraphrased signals),
 location_fit_reason (short Russian string), employment_quality (permanent/full-time/temporary/etc.),
 deadline (exact stated value or null), deadline_urgency (none/soon/urgent/expired/unknown), and
@@ -43,7 +46,7 @@ into one of the four career routes.
 Ranking priorities, in order:
 1. Concrete low-barrier evidence: trainee/junior/graduate/Level I, training or mentoring, explicit
    encouragement to apply without every criterion, or acceptance of adjacent reporting experience.
-2. Specific evidence that Andrey's supplied path CV can satisfy the actual mandatory work.
+2. Specific evidence that Andrey's correctly route-matched CV can satisfy the actual mandatory work.
 3. Geography quality within policy: exact Blackpool/Preston convenience, genuinely remote UK work,
    or a clearly stated workable North-West hybrid arrangement. Do not assume hybrid from location.
 4. Direct-employer confidence, permanent/full-time quality, progression, and useful salary.

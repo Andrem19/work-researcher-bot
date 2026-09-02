@@ -51,6 +51,9 @@ max_jobs = 10
 max_per_path = 10
 detailed_jobs = 5
 pre_llm_max_per_path = 15
+pre_llm_max_per_source_path = 8
+diverse_max_per_path = 4
+diverse_max_per_source = 5
 include_seen = false
 
 [market]

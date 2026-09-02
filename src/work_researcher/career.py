@@ -45,6 +45,106 @@ MONTHS = {
 ONSITE_ALLOWED = ("blackpool", "preston", "lytham", "fleetwood", "poulton", "kirkham")
 HYBRID_ALLOWED = (*ONSITE_ALLOWED, "manchester", "salford", "bolton", "wigan", "lancaster", "liverpool", "chorley", "warrington", "burnley")
 
+# Query results from several boards are deliberately broad. A search query is
+# discovery evidence, not a career-path label. These patterns label a vacancy
+# from its own title and description before a CV is selected.
+PATH_SIGNALS: dict[str, dict[str, tuple[tuple[str, int], ...]]] = {
+    "data_engineering": {
+        "title": (
+            (r"\bdata engineer(?:ing)?\b", 100),
+            (r"\banalytics engineer\b", 95),
+            (r"\b(?:etl|data integration|data platform|data warehouse) (?:engineer|developer)\b", 90),
+            (r"\b(?:sql|database) developer\b", 75),
+        ),
+        "body": (
+            (r"\bdata pipeline", 16), (r"\betl\b|\belt\b", 14),
+            (r"\bdatabricks\b|\bspark\b", 14), (r"\bdata factory\b|\bairflow\b|\bdbt\b", 12),
+            (r"\bdata warehouse\b|\bdata lake", 10), (r"\bdata model", 8),
+        ),
+    },
+    "geospatial_data": {
+        "title": (
+            (r"\b(?:gis|geospatial|spatial|geomatics)\b", 105),
+            (r"\bgeoscience data\b", 95),
+        ),
+        "body": (
+            (r"\b(?:gis|geospatial|spatial data|geomatics)\b", 22),
+            (r"\b(?:arcgis|qgis|postgis|geopandas)\b", 18),
+            (r"\b(?:mapping|cartograph|remote sensing)\b", 10),
+        ),
+    },
+    "analytics": {
+        "title": (
+            (r"\bdata analyst\b", 100),
+            (r"\b(?:bi|business intelligence|reporting) (?:analyst|developer)\b", 95),
+            (r"\banalytics? (?:analyst|developer)\b", 90),
+            (r"\b(?:insight|performance) analyst\b", 70),
+            (r"\banalyst\b", 15),
+            (r"\bdata services specialist\b", 30),
+        ),
+        "body": (
+            (r"\bpower ?bi\b|\btableau\b", 18), (r"\bsql\b", 14),
+            (r"\bdashboard", 10), (r"\bdata analy", 10),
+            (r"\breporting\b|\bmanagement information\b", 8), (r"\bexcel\b", 5),
+        ),
+    },
+    "software_data_platform": {
+        "title": (
+            (r"\b(?:software|backend|python|application) (?:engineer|developer)\b", 100),
+            (r"\bdeveloper\b", 45),
+        ),
+        "body": (
+            (r"\bpython\b", 18), (r"\b(?:rest|web) api", 14),
+            (r"\b(?:django|fastapi|flask)\b", 14), (r"\bbackend\b", 10),
+            (r"\bunit test|\bsoftware development\b", 8),
+        ),
+    },
+}
+MIN_PATH_SCORE = 45
+
+
+def career_path_scores(card: JobCard) -> dict[str, dict[str, Any]]:
+    """Score all routes from vacancy evidence, independently of its search query."""
+    title = card.title or ""
+    body = f"{title} {card.description or ''}"
+    results: dict[str, dict[str, Any]] = {}
+    for path_id, groups in PATH_SIGNALS.items():
+        score = 0
+        evidence = []
+        for pattern, weight in groups["title"]:
+            match = re.search(pattern, title, re.I)
+            if match:
+                score = max(score, weight)
+                evidence.append(match.group(0))
+        for pattern, weight in groups["body"]:
+            match = re.search(pattern, body, re.I)
+            if match:
+                score += weight
+                evidence.append(match.group(0))
+        results[path_id] = {
+            "score": min(100, score),
+            "evidence": list(dict.fromkeys(item.lower() for item in evidence))[:5],
+        }
+    return results
+
+
+def classify_career_path(card: JobCard) -> tuple[str | None, int, list[str]]:
+    """Return the strongest actual route; geospatial wins a genuine spatial tie."""
+    scores = career_path_scores(card)
+    priority = {
+        "geospatial_data": 4,
+        "data_engineering": 3,
+        "software_data_platform": 2,
+        "analytics": 1,
+    }
+    path_id, result = max(
+        scores.items(),
+        key=lambda item: (item[1]["score"], priority[item[0]]),
+    )
+    if result["score"] < MIN_PATH_SCORE:
+        return None, int(result["score"]), result["evidence"]
+    return path_id, int(result["score"]), result["evidence"]
+
 
 def _parse_deadline(value: str) -> date | None:
     text_match = TEXT_DATE_RE.search(value)
@@ -161,14 +261,18 @@ def deterministic_assessment(card: JobCard, path_id: str, cv_text: str) -> dict[
         hard_rejects.append("unmet mandatory requirements")
     if status["closed"]:
         hard_rejects.append("vacancy is closed or its stated deadline has passed")
-    score = 50
+    path_result = career_path_scores(card).get(path_id, {"score": 0, "evidence": []})
+    score = 45
     score += 18 if ENTRY_RE.search(f"{card.title} {card.description}") else 5
     score += 12 if work_mode(card) == "remote" else 8
     score += 8 if card.salary_min else 0
     score += 8 if card.description and len(card.description) > 300 else 0
+    score += min(12, int(path_result["score"]) // 8)
     score -= 50 if hard_rejects else 0
     return {
         "path_id": path_id, "eligible": not hard_rejects, "base_score": max(0, min(100, score)),
+        "path_score": int(path_result["score"]),
+        "path_evidence": path_result["evidence"],
         "posted_by": posted_by, "posted_by_reason": posted_reason,
         "work_mode": work_mode(card), "location_reason": location_reason,
         "entry_reason": entry_reason, "mandatory": [x["value"] for x in reqs["hard"]],

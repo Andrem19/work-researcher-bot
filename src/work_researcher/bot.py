@@ -16,7 +16,7 @@ from selectolax.parser import HTMLParser
 
 from . import dedup
 from . import persistence as db
-from .career import deterministic_assessment
+from .career import classify_career_path, deterministic_assessment
 from .config import Settings, ensure_dirs
 from .cvmanager import extract_text
 from .domain import JobCard, SearchParams
@@ -49,6 +49,112 @@ def _report_signature(job: dict) -> tuple[str, str, str]:
     for field in ("title", "company", "salary_raw"):
         normalized.append(re.sub(r"[^a-z0-9]+", " ", str(job.get(field) or "").lower()).strip())
     return tuple(normalized)
+
+
+def _report_base_title(value: str | None) -> str:
+    """Remove board-added employer suffixes from a title for report dedup."""
+    value = (value or "").split("|", 1)[0]
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _is_report_duplicate(job: dict, selected: list[dict]) -> bool:
+    signature = _report_signature(job)
+    if any(_report_signature(other) == signature for other in selected):
+        return True
+    title = _report_base_title(job.get("title"))
+    salary = re.sub(r"[^a-z0-9]+", " ", str(job.get("salary_raw") or "").lower()).strip()
+    location = re.sub(
+        r"[^a-z0-9]+", " ", str(job.get("location_text") or "").lower()
+    ).strip()
+    generic_companies = {"nhs jobs", "find a job", "civil service jobs", "not specified"}
+    company = re.sub(
+        r"[^a-z0-9]+", " ", str(job.get("company") or "").lower()
+    ).strip()
+    for other in selected:
+        other_company = re.sub(
+            r"[^a-z0-9]+", " ", str(other.get("company") or "").lower()
+        ).strip()
+        if (
+            title == _report_base_title(other.get("title"))
+            and salary == re.sub(
+                r"[^a-z0-9]+", " ", str(other.get("salary_raw") or "").lower()
+            ).strip()
+            and location == re.sub(
+                r"[^a-z0-9]+", " ", str(other.get("location_text") or "").lower()
+            ).strip()
+            and (company in generic_companies or other_company in generic_companies)
+        ):
+            return True
+    return False
+
+
+def _preselect_candidates(
+    candidates: list[tuple[str, JobCard, dict]],
+    *,
+    max_per_path: int,
+    max_per_source_path: int,
+) -> list[tuple[str, JobCard, dict]]:
+    """Keep model input broad across paths and sources, with soft source caps."""
+    selected = []
+    deferred = []
+    path_counts = defaultdict(int)
+    source_path_counts = defaultdict(int)
+    for item in candidates:
+        path_id = item[2]["path_id"]
+        source_path = (path_id, item[1].source)
+        if path_counts[path_id] >= max_per_path:
+            continue
+        if source_path_counts[source_path] >= max_per_source_path:
+            deferred.append(item)
+            continue
+        selected.append(item)
+        path_counts[path_id] += 1
+        source_path_counts[source_path] += 1
+    for item in deferred:
+        path_id = item[2]["path_id"]
+        if path_counts[path_id] >= max_per_path:
+            continue
+        selected.append(item)
+        path_counts[path_id] += 1
+    return selected
+
+
+def _select_report_jobs(
+    jobs: list[dict],
+    *,
+    max_jobs: int,
+    diverse_max_per_path: int,
+    diverse_max_per_source: int,
+) -> list[dict]:
+    """Prefer a varied top list, then fill any gaps with the best remaining jobs."""
+    unique = []
+    for job in jobs:
+        if not _is_report_duplicate(job, unique):
+            unique.append(job)
+
+    selected = []
+    deferred = []
+    path_counts = defaultdict(int)
+    source_counts = defaultdict(int)
+    for job in unique:
+        if (
+            path_counts[job["path_id"]] >= diverse_max_per_path
+            or source_counts[job["source"]] >= diverse_max_per_source
+        ):
+            deferred.append(job)
+            continue
+        selected.append(job)
+        path_counts[job["path_id"]] += 1
+        source_counts[job["source"]] += 1
+        if len(selected) >= max_jobs:
+            return selected
+    for job in deferred:
+        selected.append(job)
+        if len(selected) >= max_jobs:
+            break
+    order = {str(job.get("job_key")): index for index, job in enumerate(jobs)}
+    selected.sort(key=lambda job: order.get(str(job.get("job_key")), len(jobs)))
+    return selected
 
 
 def _apply_global_ranking(jobs: list[dict], ranking: list[dict]) -> list[dict]:
@@ -283,6 +389,10 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
     cv_sync = await sync_cvs_from_drive(settings)
     logger.info("CV sync completed: %d files", len(cv_sync.get("files", [])))
     cvs = _assign_cvs(settings)
+    logger.info(
+        "CV route mapping: %s",
+        ", ".join(f"{path_id}={cv['filename']}" for path_id, cv in cvs.items()),
+    )
     tagged_cards, provider_health = await _collect(settings)
     logger.info("Provider collection completed: %d tagged cards", len(tagged_cards))
 
@@ -298,16 +408,20 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
     logger.info("Description enrichment completed: %d unique cards", len(by_hash))
 
     candidates = []
+    outside_routes = 0
     for key, record in by_hash.items():
         card = record["card"]
-        best = None
-        for path_id in record["paths"]:
-            assessment = deterministic_assessment(card, path_id, cvs[path_id]["text"])
-            if best is None or assessment["base_score"] > best["base_score"]:
-                best = assessment
-        if best and best["eligible"]:
-            candidates.append((key, card, best))
+        path_id, path_score, path_evidence = classify_career_path(card)
+        if path_id is None or path_id not in cvs:
+            outside_routes += 1
+            continue
+        assessment = deterministic_assessment(card, path_id, cvs[path_id]["text"])
+        assessment["path_score"] = path_score
+        assessment["path_evidence"] = path_evidence
+        if assessment["eligible"]:
+            candidates.append((key, card, assessment))
     logger.info("Deterministic screening completed: %d eligible cards", len(candidates))
+    logger.info("Career-path screening excluded %d off-route cards", outside_routes)
 
     pool_cards = [record["card"] for record in by_hash.values()]
     async with db.connect(settings.db_path) as conn:
@@ -318,6 +432,10 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
         await conn.commit()
 
     allow_seen = settings.report.get("include_seen", False) if include_seen is None else include_seen
+    candidates = [
+        item for item in candidates
+        if allow_seen or item[0] not in already_delivered
+    ]
     candidates.sort(
         key=lambda item: (
             -item[2]["base_score"],
@@ -325,27 +443,24 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
             item[1].title or "",
         )
     )
-    pre_llm_per_path = int(settings.report.get("pre_llm_max_per_path", 15))
-    pre_llm_counts = defaultdict(int)
-    shortlist = []
-    for item in candidates:
-        path_id = item[2]["path_id"]
-        if pre_llm_counts[path_id] >= pre_llm_per_path:
-            continue
-        pre_llm_counts[path_id] += 1
-        shortlist.append(item)
+    shortlist = _preselect_candidates(
+        candidates,
+        max_per_path=int(settings.report.get("pre_llm_max_per_path", 15)),
+        max_per_source_path=int(
+            settings.report.get("pre_llm_max_per_source_path", 8)
+        ),
+    )
 
     llm_items = []
     candidate_map = {}
     for key, card, base in shortlist:
-        if not (allow_seen or key not in already_delivered):
-            continue
         cv = cvs[base["path_id"]]
         llm_items.append({
             "job_key": key, "career_path": settings.career_paths[base["path_id"]]["label"],
             "title": card.title, "company": card.company, "location": card.location_text,
             "salary": card.salary_raw, "source": card.source, "url": card.url,
             "description": (card.description or "")[:6000], "deterministic": base,
+            "path_evidence": base.get("path_evidence", []),
             "cv_filename": cv["filename"], "cv_excerpt": cv["text"][:10000],
         })
         candidate_map[key] = (card, base, cv)
@@ -406,20 +521,12 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
             jobs = _apply_global_ranking(jobs, ranking)
         except Exception as exc:
             logger.warning("GLM global rerank failed; keeping batch-score order: %s", exc)
-    per_path = defaultdict(int)
-    selected = []
-    report_signatures = set()
-    for job in jobs:
-        signature = _report_signature(job)
-        if signature in report_signatures:
-            continue
-        if per_path[job["path_id"]] >= int(settings.report.get("max_per_path", 12)):
-            continue
-        report_signatures.add(signature)
-        per_path[job["path_id"]] += 1
-        selected.append(job)
-        if len(selected) >= int(settings.report.get("max_jobs", 40)):
-            break
+    selected = _select_report_jobs(
+        jobs,
+        max_jobs=int(settings.report.get("max_jobs", 10)),
+        diverse_max_per_path=int(settings.report.get("diverse_max_per_path", 4)),
+        diverse_max_per_source=int(settings.report.get("diverse_max_per_source", 5)),
+    )
 
     messages = render_report(
         selected,
