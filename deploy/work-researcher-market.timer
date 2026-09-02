@@ -1,8 +1,8 @@
 [Unit]
-Description=Run UK technology market research every Friday evening
+Description=Run UK technology market research every Friday at 20:00 UK time
 
 [Timer]
-OnCalendar=Fri *-*-* 19:00:00 Europe/London
+OnCalendar=Fri *-*-* 20:00:00 Europe/London
 Persistent=true
 AccuracySec=1min
 Unit=work-researcher-market.service

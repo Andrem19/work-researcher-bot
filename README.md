@@ -1,7 +1,7 @@
 # Work Researcher Bot
 
 Серверный агент поиска работы для одного кандидата — Andrey Remnev. Каждый
-вечер в 22:00 по времени United Kingdom он обновляет четыре профильных CV из
+вечер в 20:00 по времени United Kingdom он обновляет четыре профильных CV из
 публичной папки Google Drive, ищет entry-level вакансии, фильтрует агентства и
 неподходящую географию, оценивает вакансии через `glm-5.3-flash` и отправляет
 ранжированный HTML-отчёт в Telegram.
@@ -59,7 +59,7 @@ uv run python scripts/verify_report_freshness.py /path/to/nightly-runs/report.js
 ```
 
 ```text
-22:00 Europe/London
+20:00 Europe/London
   -> public Google Drive: download + validate exactly four non-geology CVs
   -> national queries + отдельные Blackpool/Preston/Lancashire/Manchester queries
      across configured providers, включая GOV.UK Find a job и Civil Service Careers
@@ -79,7 +79,7 @@ Telegram-отчёт содержит максимум 10 вакансий: пе�
 
 ## Еженедельное исследование рынка
 
-Каждую пятницу в 19:00 UK time отдельный `work-researcher-market.timer`
+Каждую пятницу в 20:00 UK time отдельный `work-researcher-market.timer`
 исследует рынок по матрице 4 карьерных направления × 3 уровня: Entry, Middle и
 High-paying (£80k+). GLM-5.3-Flash подтверждает релевантность и уровень роли,
 а воспроизводимый Python-анализ рассчитывает спрос на технологии, salary

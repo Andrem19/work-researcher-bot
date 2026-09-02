@@ -10,7 +10,7 @@ Current product boundary:
 - fresh public-Drive CV snapshot before every run;
 - UK entry-level discovery with strict agency, seniority and location rules;
 - GLM-5.3-Flash assessment;
-- detailed ranked Telegram delivery at 22:00 UK time;
+- nightly search starts at 20:00 UK time, followed by detailed ranked Telegram delivery;
 - local development, GitHub main branch and GitHub Actions deployment;
 - application submission retained as a separate local MCP capability.
 

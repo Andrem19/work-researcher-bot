@@ -43,7 +43,7 @@ does not send Telegram messages or mark jobs as delivered.
 ## Weekly market dashboard
 
 `work-researcher weekly-market` creates an immutable dated snapshot plus the
-public `market/site/data.json`. Production runs it every Friday at 19:00 in the
+public `market/site/data.json`. Production runs it every Friday at 20:00 in the
 `Europe/London` timezone. Deployment installs the project-owned Nginx snippet,
 validates the complete configuration with `nginx -t`, then reloads Nginx. The
 dashboard is served at `https://devbot.remart.ovh/jobs/`; deployments update its
