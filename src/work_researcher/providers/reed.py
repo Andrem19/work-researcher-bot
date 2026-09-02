@@ -9,7 +9,7 @@ from __future__ import annotations
 import base64
 import re
 from datetime import UTC, datetime, timedelta
-from urllib.parse import quote_plus, urljoin
+from urllib.parse import urlencode, urljoin, urlparse
 
 from selectolax.parser import HTMLParser
 
@@ -140,6 +140,18 @@ def parse_html(html: str, query: SearchQuery) -> list[JobCard]:
     return cards
 
 
+def search_url(query: SearchQuery) -> str:
+    slug = slugify(query.query)
+    location = query.location.strip()
+    path = f"/jobs/{slug}-jobs"
+    if location.upper() not in {"", "UK", "UNITED KINGDOM", "GREAT BRITAIN", "ENGLAND"}:
+        path += f"-in-{slugify(location)}"
+    params = {"hideTrainingJobs": "true", "proximity": str(query.radius_miles)}
+    if query.get("direct_employers_only"):
+        params["direct"] = "true"
+    return f"{BASE}{path}?{urlencode(params)}"
+
+
 async def fetch(query: SearchQuery, cfg: dict) -> list[JobCard]:
     api_key = cfg.get("api_key") if isinstance(cfg, dict) else None
     if api_key:
@@ -149,14 +161,28 @@ async def fetch(query: SearchQuery, cfg: dict) -> list[JobCard]:
                 return cards
         except ProviderError:
             pass  # fall through to HTML
-    slug = slugify(query.query)
-    # hideTrainingJobs is Reed's own filter for paid-course ads
-    url = f"{BASE}/jobs/{slug}-jobs?hideTrainingJobs=true"
+    url = search_url(query)
+    cards: list[JobCard] = []
+    seen: set[str] = set()
     async with html_client() as client:
-        resp = await client.get(url)
-        if resp.status_code != 200:
-            raise ProviderError(f"HTTP {resp.status_code} for {url}")
-        cards = parse_html(resp.text, query)
-    if not cards:
-        raise ProviderError(f"0 cards parsed from {url} — selector drift?")
-    return cards
+        for _ in range(int(cfg.get("max_pages", 4))):
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                if cards:
+                    break
+                raise ProviderError(f"HTTP {resp.status_code} for {url}")
+            page_cards = parse_html(resp.text, query)
+            fresh = [card for card in page_cards if card.url and card.url not in seen]
+            cards.extend(fresh)
+            seen.update(card.url for card in fresh)
+            if len(cards) >= query.limit:
+                break
+            tree = HTMLParser(resp.text)
+            next_link = tree.css_first('a[aria-label="Next page"]')
+            if not fresh or next_link is None:
+                break
+            next_url = urljoin(str(resp.url), next_link.attributes.get("href") or "")
+            if urlparse(next_url).netloc != urlparse(BASE).netloc or next_url == url:
+                break
+            url = next_url
+    return cards[:query.limit]

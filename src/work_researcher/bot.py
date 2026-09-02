@@ -24,7 +24,7 @@ from .drive import sync_cvs_from_drive
 from .llm import assess_batch, rerank_shortlist
 from .providers import run_search
 from .telegram import render_report, send_messages
-from .textutils import job_hash
+from .textutils import job_hash, parse_salary
 
 logger = logging.getLogger("work_researcher.bot")
 
@@ -43,11 +43,19 @@ LOCAL_DISCOVERY_QUERIES = {
 }
 
 
+def _report_salary(value: str | None) -> str:
+    minimum, maximum, period = parse_salary(value)
+    if minimum is not None or maximum is not None:
+        return f"{minimum}:{maximum}:{period}"
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
 def _report_signature(job: dict) -> tuple[str, str, str]:
     """Identify regional copies of the same employer/title/salary advert."""
     normalized = []
-    for field in ("title", "company", "salary_raw"):
+    for field in ("title", "company"):
         normalized.append(re.sub(r"[^a-z0-9]+", " ", str(job.get(field) or "").lower()).strip())
+    normalized.append(_report_salary(job.get("salary_raw")))
     return tuple(normalized)
 
 
@@ -62,7 +70,7 @@ def _is_report_duplicate(job: dict, selected: list[dict]) -> bool:
     if any(_report_signature(other) == signature for other in selected):
         return True
     title = _report_base_title(job.get("title"))
-    salary = re.sub(r"[^a-z0-9]+", " ", str(job.get("salary_raw") or "").lower()).strip()
+    salary = _report_salary(job.get("salary_raw"))
     location = re.sub(
         r"[^a-z0-9]+", " ", str(job.get("location_text") or "").lower()
     ).strip()
@@ -76,9 +84,7 @@ def _is_report_duplicate(job: dict, selected: list[dict]) -> bool:
         ).strip()
         if (
             title == _report_base_title(other.get("title"))
-            and salary == re.sub(
-                r"[^a-z0-9]+", " ", str(other.get("salary_raw") or "").lower()
-            ).strip()
+            and salary == _report_salary(other.get("salary_raw"))
             and location == re.sub(
                 r"[^a-z0-9]+", " ", str(other.get("location_text") or "").lower()
             ).strip()
@@ -155,6 +161,19 @@ def _select_report_jobs(
     order = {str(job.get("job_key")): index for index, job in enumerate(jobs)}
     selected.sort(key=lambda job: order.get(str(job.get("job_key")), len(jobs)))
     return selected
+
+
+def _write_run_audit(settings: Settings, started: datetime, payload: dict) -> None:
+    """Persist the exact report for later quality audits, without keys or full CVs."""
+    try:
+        directory = settings.data_dir / "nightly-runs"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{started:%Y%m%dT%H%M%SZ}.json"
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(path)
+    except OSError as exc:
+        logger.warning("Could not save nightly report audit: %s", exc)
 
 
 def _apply_global_ranking(jobs: list[dict], ranking: list[dict]) -> list[dict]:
@@ -338,6 +357,7 @@ async def _collect(settings: Settings) -> tuple[list[tuple[str, JobCard]], list[
                 query=query_text, location=location,
                 max_days_old=max_days_old or settings.default_max_days_old,
                 limit_per_source=settings.default_limit_per_source, exclude_training=True,
+                direct_employers_only=True,
                 sources=sources,
             )
             cards_by_provider, reports = await run_search(settings, params.model_dump())
@@ -540,6 +560,14 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
         started,
         detailed_jobs=int(settings.report.get("detailed_jobs", 5)),
     )
+    result = {
+        "ok": True, "started_at": started.isoformat(), "cv_sync": cv_sync,
+        "provider_health": provider_health, "raw_cards": len(tagged_cards),
+        "deduplicated": len(by_hash), "duplicates_merged": merged,
+        "eligible_before_glm": len(llm_items), "reported": len(selected),
+        "message_ids": [], "jobs": selected,
+    }
+    _write_run_audit(settings, started, {**result, "delivery_status": "prepared", "messages": messages})
     message_ids = await send_messages(settings, messages) if deliver else []
     if deliver:
         async with db.connect(settings.db_path) as conn:
@@ -549,10 +577,8 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
                 message_ids,
             )
     logger.info("Run completed: %d jobs, %d Telegram messages", len(selected), len(message_ids))
-    return {
-        "ok": True, "started_at": started.isoformat(), "cv_sync": cv_sync,
-        "provider_health": provider_health, "raw_cards": len(tagged_cards),
-        "deduplicated": len(by_hash), "duplicates_merged": merged,
-        "eligible_before_glm": len(llm_items), "reported": len(selected),
-        "message_ids": message_ids, "jobs": selected,
-    }
+    result["message_ids"] = message_ids
+    _write_run_audit(settings, started, {
+        **result, "delivery_status": "delivered" if deliver else "dry_run", "messages": messages,
+    })
+    return result

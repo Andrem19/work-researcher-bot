@@ -106,6 +106,8 @@ def render_report(
                 + f"✅ <b>CV-fit:</b> {_value(job.get('cv_strengths'), max_items=3, max_chars=180)}\n"
                 + f"⚠️ <b>Пробелы:</b> {_value(job.get('cv_gaps'), max_items=3, max_chars=180)}\n"
                 + f"⚙️ <b>Особые условия:</b> {_value(job.get('special_conditions'), max_items=2, max_chars=160)}\n"
+                + f"🔐 <b>Работодатель:</b> {_value(job.get('direct_employer_reason'), max_chars=100)}\n"
+                + f"🚩 <b>Замечания:</b> {_value(job.get('rejection_reasons'), max_items=2, max_chars=160)}\n"
                 + f"⏳ <b>Срок подачи:</b> {_value(job.get('deadline'))} | "
                 + f"<b>Срочность:</b> {_value(job.get('deadline_urgency'))}\n"
                 + f"📄 <b>CV:</b> {_value(job.get('cv_filename'))}\n"

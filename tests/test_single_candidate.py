@@ -1,19 +1,24 @@
+import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from work_researcher import persistence as db
+from work_researcher import seller, training
 from work_researcher.bot import (
     _apply_global_ranking,
     _assign_cvs,
     _build_ranked_jobs,
     _report_signature,
     _select_report_jobs,
+    _write_run_audit,
 )
 from work_researcher.career import (
     classify_career_path,
     deterministic_assessment,
+    entry_allowed,
     location_allowed,
     vacancy_status,
 )
@@ -69,7 +74,7 @@ def test_agency_and_senior_roles_are_rejected() -> None:
 
 
 def test_known_agencies_from_live_results_are_rejected() -> None:
-    for company in ("Allstaff", "The Huntsmith Limited"):
+    for company in ("Allstaff", "The Huntsmith Limited", "Avanti", "Vermelo RPO", "Southern Lights Ltd"):
         card = JobCard(
             source="test", title="Junior Data Analyst", company=company,
             location_text="Remote", description="Remote UK",
@@ -77,6 +82,38 @@ def test_known_agencies_from_live_results_are_rejected() -> None:
         result = deterministic_assessment(card, "analytics", "SQL Power BI")
         assert result["eligible"] is False
         assert result["posted_by"] == "agency"
+
+
+def test_agency_client_wording_and_unrelated_brand_are_distinguished() -> None:
+    assert seller.classify("Akkodis", "My client are hiring a Data Analyst.")[0] == "agency"
+    assert seller.classify("Avanti West Coast", "Join our own analytics team.")[0] == "employer"
+    assert seller.classify("Breedon Group plc", "Join our data team.")[0] == "employer"
+    assert seller.classify("Environment Agency", "Join our GIS team.")[0] == "employer"
+    assert seller.classify("eFinancialCareers", "A data job listing.")[0] == "unknown"
+
+
+def test_normal_employee_benefits_are_not_paid_training() -> None:
+    job = JobCard(
+        source="test", title="Junior Data Engineer", company="Acme",
+        salary_min=30000, salary_max=35000,
+        description="Salary sacrifice pension and cycle scheme; loan repayment through payroll.",
+    )
+    assert training.classify(job) == (False, None)
+    course = job.model_copy(update={"description": "You must pay for your training. Course fees apply."})
+    assert training.classify(course)[0] is True
+
+
+def test_mentoring_juniors_is_not_positive_entry_evidence() -> None:
+    job = JobCard(
+        source="test", title="Data Engineer",
+        description="Provide guidance and mentoring to junior team members.",
+    )
+    assert entry_allowed(job)[0] is False
+    junior = job.model_copy(update={
+        "title": "Junior Data Engineer",
+        "description": "You will receive mentoring from experienced colleagues.",
+    })
+    assert entry_allowed(junior)[0] is True
 
 
 def test_apprentice_role_with_manager_in_occupation_name_is_entry_level() -> None:
@@ -248,12 +285,23 @@ def test_report_selection_collapses_board_and_employer_copy() -> None:
             **common, "job_key": "employer",
             "title": "Compliance and Assurance Analyst | Lancashire Teaching Hospitals",
             "company": "Lancashire Teaching Hospitals NHS Foundation Trust",
+            "salary_raw": "£25,760 - £27,476 Per Annum, Pro Rata",
         },
     ]
     selected = _select_report_jobs(
         jobs, max_jobs=10, diverse_max_per_path=4, diverse_max_per_source=5
     )
     assert [job["job_key"] for job in selected] == ["board"]
+
+
+def test_exact_report_audit_is_saved_for_later_diagnosis(tmp_path: Path) -> None:
+    settings = load_settings(Path("missing-test-config.toml"))
+    settings.data_dir = tmp_path
+    started = datetime(2026, 9, 2, 16, 0, tzinfo=UTC)
+    payload = {"messages": ["Report"], "jobs": [{"title": "Data Engineer"}]}
+    _write_run_audit(settings, started, payload)
+    path = tmp_path / "nightly-runs" / "20260902T160000Z.json"
+    assert json.loads(path.read_text(encoding="utf-8")) == payload
 
 
 def test_cv_assignment_uses_the_four_route_specific_filenames(tmp_path: Path) -> None:

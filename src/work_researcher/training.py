@@ -21,11 +21,10 @@ COURSE_TITLE_MARKERS = (
 
 # You-pay-them language
 PAY_MARKERS = (
-    "course fee", "fees apply", "fee of £", "payment plan", "learner loan",
+    "course fee", "fees apply", "fee of £", "learner loan",
     "advanced learner", "self-fund", "self fund", "funded by you",
-    "funding options available", "invest in your career", "training investment",
-    "cost of the course", "pay for your training", "free trial",
-    "salary sacrifice", "repayment",
+    "funding options available", "training investment",
+    "cost of the course", "pay for your training",
 )
 
 # Known paid-course mills / resellers (name fragments)
@@ -76,11 +75,13 @@ def classify(card: JobCard) -> tuple[bool, str | None]:
 
     company_is_training_ish = any(w in company for w in TRAINING_COMPANY_WORDS)
     title_is_junior_ish = any(w in title for w in JUNIOR_TITLE_WORDS)
-    if title_is_junior_ish and (_bait_salary_range(card) or "up to" in salary_raw):
-        if company_is_training_ish or (card.salary_max or 0) >= 45000:
-            return True, "trainee role with a bait salary range (course ad)"
-    if company_is_training_ish and title_is_junior_ish:
-        if not card.salary_min:
-            return True, "training company + junior/trainee role + no salary"
-        # salary stated → real (paid) apprenticeship: keep it
+    if (
+        title_is_junior_ish
+        and (_bait_salary_range(card) or "up to" in salary_raw)
+        and (company_is_training_ish or (card.salary_max or 0) >= 45000)
+    ):
+        return True, "trainee role with a bait salary range (course ad)"
+    if company_is_training_ish and title_is_junior_ish and not card.salary_min:
+        return True, "training company + junior/trainee role + no salary"
+    # A stated salary keeps a real paid apprenticeship eligible.
     return False, None

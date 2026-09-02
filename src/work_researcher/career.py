@@ -12,6 +12,10 @@ from .domain import JobCard
 SENIOR_RE = re.compile(r"\b(senior|lead|principal|staff|manager|head of|director|architect)\b", re.I)
 ENTRY_RE = re.compile(r"\b(junior|trainee|graduate|entry[ -]level|associate|level 1|data engineer i|apprentice)\b", re.I)
 YEARS_RE = re.compile(r"\b([3-9]|\d{2,})\+?\s+years?\b", re.I)
+MENTOR_JUNIORS_RE = re.compile(
+    r"\b(?:mentor(?:ing)?|coach(?:ing)?|supervis(?:e|ing)|manage|guidance)\b"
+    r"[^.;]{0,70}\bjunior\b", re.I,
+)
 REMOTE_RE = re.compile(r"\b(remote|work from home|wfh|home[ -]based|anywhere in (?:the )?uk)\b", re.I)
 HYBRID_RE = re.compile(r"\bhybrid\b", re.I)
 ONSITE_ONLY_RE = re.compile(
@@ -233,6 +237,8 @@ def entry_allowed(card: JobCard) -> tuple[bool, str]:
         return True, "explicit entry-level signal"
     if SENIOR_RE.search(card.title or ""):
         return False, "senior title"
+    if MENTOR_JUNIORS_RE.search(card.description or ""):
+        return False, "role requires mentoring or supervising junior colleagues"
     if YEARS_RE.search(text):
         return False, "requires at least 3 years of experience"
     if ENTRY_RE.search(text):

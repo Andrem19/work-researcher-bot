@@ -35,7 +35,12 @@ jobs:
           src/work_researcher/cli.py
           src/work_researcher/persistence.py
           src/work_researcher/requirements.py
+          src/work_researcher/domain.py
+          src/work_researcher/seller.py
+          src/work_researcher/training.py
+          src/work_researcher/providers/reed.py
           tests/test_single_candidate.py
+          tests/test_public_job_sources.py
           tests/test_market.py
           tests/test_drive.py
       - run: uv run pytest -q

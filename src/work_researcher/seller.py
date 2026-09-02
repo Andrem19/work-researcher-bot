@@ -12,10 +12,12 @@ Returns (seller, reason): seller = 'agency' | 'employer' | 'unknown'.
 
 from __future__ import annotations
 
+import re
+
 AGENCY_NAME_WORDS = (
     "recruitment", "recruiter", "recruiting", "staffing",
     "personnel", "resourcing", "search & selection", "search and selection",
-    "agency", "talent solutions", "employment agency", "staff solutions",
+    "talent solutions", "employment agency", "staff solutions",
     "work solutions", "recruitment consultancy", "recruitment agency",
     # NB: bare "consultancy"/"associates" are NOT markers — engineering
     # consultancies (Atkins/RSK/Bridgewater) are employers in geoscience;
@@ -42,12 +44,20 @@ AGENCY_BRANDS = (
     "allstaff", "the huntsmith", "huntsmith",
 )
 
+# Exact names avoid confusing the tech recruiter "Avanti" with unrelated
+# employers such as Avanti West Coast.
+AGENCY_EXACT_NAMES = {
+    "avanti", "avanti recruitment", "vermelo rpo", "southern lights",
+}
+
 AGENCY_DESCRIPTION_PHRASES = (
     "our client is seeking", "our client is looking", "on behalf of our client",
     "our client, a ", "we are recruiting for a", "our prestigious client",
     "our client based", "client of ours",
     "acting as an employment agency", "operating as an employment agency",
     "employment agency for permanent",
+    "my client are", "my client is", "my client's", "my client\u2019s",
+    "acts as an employment agency", "recruitment is on the lookout",
 )
 
 
@@ -55,6 +65,12 @@ def classify(company: str | None, description: str | None,
              recruiter: str | None = None) -> tuple[str, str | None]:
     company_l = (company or "").lower().strip()
     desc_l = (description or "").lower()
+
+    normalized_company = re.sub(r"\s+(?:ltd|limited|plc)$", "", company_l).strip()
+    if normalized_company in AGENCY_EXACT_NAMES or re.search(r"\brpo\b", company_l):
+        return "agency", "known recruitment/RPO poster"
+    if normalized_company in {"efinancialcareers"}:
+        return "unknown", "job-board poster is not the identified employer"
 
     if recruiter and company:
         recruiter_l = recruiter.lower().strip()
@@ -65,7 +81,7 @@ def classify(company: str | None, description: str | None,
         if w in company_l:
             return "agency", f"'{w}' in poster name"
     for b in AGENCY_BRANDS:
-        if b in company_l:
+        if re.search(rf"(?<!\w){re.escape(b)}(?!\w)", company_l):
             return "agency", f"known agency brand '{b}'"
     for p in AGENCY_DESCRIPTION_PHRASES:
         if p in desc_l:
