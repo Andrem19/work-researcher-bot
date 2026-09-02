@@ -55,8 +55,8 @@ DEFAULTS: dict = {
         "pre_llm_max_per_path": 15, "include_seen": False,
     },
     "market": {
-        "window_days": 30, "limit_per_source": 40, "max_per_slice": 120,
-        "llm_batch_size": 6, "high_salary_threshold": 80000,
+        "window_days": 90, "limit_per_source": 100, "max_per_slice": 250,
+        "llm_batch_size": 8, "high_salary_threshold": 80000,
         "minimum_combination_count": 2, "site_dir": "market/site",
         "history_dir": "market/history", "history_weeks": 104,
     },

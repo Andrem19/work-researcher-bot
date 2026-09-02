@@ -34,33 +34,82 @@ MARKET_PATHS = {
     "data_engineering": {
         "label": "Data Engineering",
         "queries": {
-            "entry": ["Junior Data Engineer", "Graduate Data Engineer"],
-            "middle": ["Data Engineer", "Analytics Engineer"],
-            "high": ["Senior Data Engineer", "Lead Data Engineer", "Data Architect"],
+            "entry": [
+                "Junior Data Engineer", "Graduate Data Engineer", "Trainee Data Engineer",
+                "Data Engineering Apprentice", "Junior Analytics Engineer",
+                "Junior ETL Developer", "Junior Data Platform Engineer",
+            ],
+            "middle": [
+                "Data Engineer", "Analytics Engineer", "ETL Developer",
+                "Data Warehouse Engineer", "Data Platform Engineer", "Cloud Data Engineer",
+                "BI Engineer", "Database Developer",
+            ],
+            "high": [
+                "Senior Data Engineer", "Lead Data Engineer", "Principal Data Engineer",
+                "Data Architect", "Data Platform Architect", "Head of Data Engineering",
+                "Senior Analytics Engineer",
+            ],
         },
     },
     "geospatial_data": {
         "label": "Geospatial Data Engineering",
         "queries": {
-            "entry": ["Junior GIS Analyst", "Graduate Geospatial Analyst"],
-            "middle": ["Geospatial Data Engineer", "GIS Developer"],
-            "high": ["Senior Geospatial Engineer", "Lead GIS Architect"],
+            "entry": [
+                "Junior GIS Analyst", "Graduate Geospatial Analyst", "Junior GIS Technician",
+                "Graduate GIS", "Geospatial Apprentice", "Junior Remote Sensing Analyst",
+            ],
+            "middle": [
+                "Geospatial Data Engineer", "GIS Developer", "GIS Analyst",
+                "Geospatial Analyst", "Spatial Data Engineer", "GIS Consultant",
+                "Remote Sensing Analyst", "Geospatial Data Scientist",
+            ],
+            "high": [
+                "Senior Geospatial Engineer", "Lead GIS Architect", "Senior GIS Developer",
+                "Senior GIS Consultant", "Principal Geospatial Consultant",
+                "Geospatial Architect", "GIS Manager", "Head of Geospatial",
+            ],
         },
     },
     "analytics": {
         "label": "Data Analytics",
         "queries": {
-            "entry": ["Junior Data Analyst", "Graduate BI Analyst"],
-            "middle": ["Data Analyst", "Business Intelligence Analyst"],
-            "high": ["Senior Data Analyst", "Analytics Manager", "Head of Analytics"],
+            "entry": [
+                "Junior Data Analyst", "Graduate Data Analyst", "Trainee Data Analyst",
+                "Data Analyst Apprentice", "Junior BI Analyst", "Graduate BI Analyst",
+                "Junior Reporting Analyst",
+            ],
+            "middle": [
+                "Data Analyst", "Business Intelligence Analyst", "BI Developer",
+                "Reporting Analyst", "Insight Analyst", "Product Analyst",
+                "Marketing Data Analyst", "Operations Data Analyst",
+            ],
+            "high": [
+                "Senior Data Analyst", "Lead Data Analyst", "Principal Data Analyst",
+                "Analytics Manager", "BI Manager", "Head of Analytics",
+                "Director of Analytics", "Analytics Consultant",
+            ],
         },
     },
     "software_data_platform": {
         "label": "Software Engineering",
         "queries": {
-            "entry": ["Junior Software Engineer", "Graduate Python Developer"],
-            "middle": ["Python Software Engineer", "Backend Software Engineer"],
-            "high": ["Senior Software Engineer", "Lead Platform Engineer", "Software Architect"],
+            "entry": [
+                "Junior Software Engineer", "Graduate Software Engineer",
+                "Software Engineering Apprentice", "Junior Python Developer",
+                "Graduate Python Developer", "Junior Backend Developer",
+                "Junior Platform Engineer",
+            ],
+            "middle": [
+                "Software Engineer", "Python Software Engineer", "Backend Software Engineer",
+                "Python Developer", "Backend Developer", "Platform Engineer",
+                "API Developer", "Cloud Software Engineer",
+            ],
+            "high": [
+                "Senior Software Engineer", "Lead Software Engineer",
+                "Principal Software Engineer", "Staff Software Engineer",
+                "Lead Platform Engineer", "Principal Platform Engineer",
+                "Software Architect", "Head of Software Engineering",
+            ],
         },
     },
 }
@@ -86,6 +135,11 @@ TECHNOLOGY_PATTERNS: dict[str, tuple[str, ...]] = {
     "BigQuery": (r"\bbig\s*query\b",),
     "Redshift": (r"\bredshift\b",),
     "Microsoft Fabric": (r"\bmicrosoft fabric\b", r"\bfabric\b"),
+    "Azure Data Factory": (r"\bazure data factory\b", r"\badf\b"),
+    "Azure Synapse": (r"\b(?:azure\s+)?synapse\b",),
+    "AWS Glue": (r"\b(?:aws\s+)?glue\b",),
+    "AWS Lambda": (r"\b(?:aws\s+)?lambda\b",),
+    "Amazon S3": (r"\b(?:amazon\s+)?s3\b",),
     "Spark": (r"\b(?:apache\s+)?spark\b", r"\bpyspark\b"),
     "Kafka": (r"\b(?:apache\s+)?kafka\b",),
     "Flink": (r"\b(?:apache\s+)?flink\b",),
@@ -108,6 +162,11 @@ TECHNOLOGY_PATTERNS: dict[str, tuple[str, ...]] = {
     "Tableau": (r"\btableau\b",),
     "Looker": (r"\blooker(?: studio)?\b",),
     "Excel": (r"\bexcel\b",),
+    "DAX": (r"\bdax\b",),
+    "Power Query": (r"\bpower query\b",),
+    "SAS": (r"\bsas\b",),
+    "Pandas": (r"\bpandas\b",),
+    "NumPy": (r"\bnumpy\b",),
     "ArcGIS": (r"\barcgis(?: pro| online)?\b",),
     "QGIS": (r"\bqgis\b",),
     "PostGIS": (r"\bpostgis\b",),
@@ -115,6 +174,10 @@ TECHNOLOGY_PATTERNS: dict[str, tuple[str, ...]] = {
     "GeoPandas": (r"\bgeopandas\b",),
     "GDAL": (r"\bgdal\b",),
     "Mapbox": (r"\bmapbox\b",),
+    "ArcPy": (r"\barcpy\b",),
+    "GeoServer": (r"\bgeoserver\b",),
+    "Leaflet": (r"\bleaflet(?:\.js)?\b",),
+    "OpenLayers": (r"\bopenlayers\b",),
     "React": (r"\breact(?:\.js|js)?\b",),
     "Node.js": (r"\bnode(?:\.js|js)\b",),
     ".NET": (r"\.net\b", r"\bdotnet\b"),
@@ -126,6 +189,7 @@ TECHNOLOGY_PATTERNS: dict[str, tuple[str, ...]] = {
     "GraphQL": (r"\bgraphql\b",),
     "Microservices": (r"\bmicroservices?\b",),
     "Linux": (r"\blinux\b",),
+    "ETL/ELT": (r"\betl\b", r"\belt\b", r"extract[, ]+transform[, ]+(?:and )?load"),
 }
 
 ENTRY_RE = re.compile(
@@ -237,6 +301,15 @@ def _metric_row(
 
 def build_slice_statistics(records: list[dict], minimum_combination_count: int = 2) -> dict:
     total = len(records)
+    companies = {
+        _normal(item.get("company"))
+        for item in records
+        if _normal(item.get("company"))
+    }
+    source_counts = Counter(
+        str(item.get("source") or "unknown")
+        for item in records
+    )
     known_salaries = [item["salary"] for item in records if item.get("salary") is not None]
     salary = _salary_summary(known_salaries)
     technology_jobs: dict[str, list[dict]] = defaultdict(list)
@@ -299,6 +372,9 @@ def build_slice_statistics(records: list[dict], minimum_combination_count: int =
 
     return {
         "job_count": total,
+        "company_count": len(companies),
+        "source_count": len(source_counts),
+        "sources": dict(sorted(source_counts.items())),
         "salary_count": len(known_salaries),
         "salary_coverage_pct": round(100 * len(known_salaries) / total, 1) if total else 0,
         "salary": salary,
@@ -381,19 +457,57 @@ def _history_summary(history_dir: Path, current: dict, weeks: int) -> list[dict]
             continue
     if not any(item.get("generated_at") == current.get("generated_at") for item in snapshots):
         snapshots.append(current)
+    # Manual verification runs can happen in the same week. A trend point is a
+    # week, not a process invocation, so retain only that week's latest snapshot.
+    weekly: dict[str, dict] = {}
+    for snapshot in snapshots:
+        generated_at = snapshot.get("generated_at")
+        try:
+            generated = datetime.fromisoformat(str(generated_at).replace("Z", "+00:00"))
+            iso_year, iso_week, _ = generated.isocalendar()
+            week_key = f"{iso_year}-W{iso_week:02d}"
+        except (TypeError, ValueError):
+            week_key = str(generated_at)
+        weekly[week_key] = snapshot
+
     output = []
-    for snapshot in snapshots[-weeks:]:
+    for week_key, snapshot in list(weekly.items())[-weeks:]:
         points = {}
         for path_id, path_data in snapshot.get("paths", {}).items():
             points[path_id] = {
                 level: {
                     "jobs": stats.get("job_count", 0),
+                    "companies": stats.get("company_count", 0),
                     "salary_count": stats.get("salary_count", 0),
                     "median": stats.get("salary", {}).get("p50"),
+                    "technologies": {
+                        row.get("name"): {
+                            "count": row.get("count", 0),
+                            "demand": row.get("prevalence_pct", 0),
+                            "salary_count": row.get("salary_count", 0),
+                            "median": row.get("salary", {}).get("p50"),
+                        }
+                        for row in stats.get("technologies", [])
+                        if row.get("name")
+                    },
+                    "combinations": {
+                        row.get("name"): {
+                            "count": row.get("count", 0),
+                            "demand": row.get("prevalence_pct", 0),
+                            "salary_count": row.get("salary_count", 0),
+                            "median": row.get("salary", {}).get("p50"),
+                        }
+                        for row in stats.get("combinations", [])
+                        if row.get("name")
+                    },
                 }
                 for level, stats in path_data.get("levels", {}).items()
             }
-        output.append({"generated_at": snapshot.get("generated_at"), "paths": points})
+        output.append({
+            "week": week_key,
+            "generated_at": snapshot.get("generated_at"),
+            "paths": points,
+        })
     return output
 
 

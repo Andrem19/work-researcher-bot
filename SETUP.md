@@ -47,7 +47,9 @@ public `market/site/data.json`. Production runs it every Friday at 19:00 in the
 `Europe/London` timezone. Deployment installs the project-owned Nginx snippet,
 validates the complete configuration with `nginx -t`, then reloads Nginx. The
 dashboard is served at `https://devbot.remart.ovh/jobs/`; deployments update its
-UI but never trigger an unscheduled market crawl.
+UI but never trigger an unscheduled market crawl. The research uses a 90-day
+rolling window and 90 role-title queries. Weekly history retains per-technology
+and per-stack demand and salary medians for the trend chart (up to 104 weeks).
 
 The keyless production sources are Totaljobs, Reed HTML, Earthworks, GOV.UK
 Find a job and the official Civil Service Careers Government Digital and Data
