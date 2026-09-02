@@ -23,6 +23,7 @@ dependencies = [
     "pypdf>=4,<7",
     "playwright>=1.45,<2",
     "gdown>=5.2,<6",
+    "tzdata>=2026.3",
 ]
 
 [project.scripts]

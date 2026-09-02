@@ -42,12 +42,29 @@
 
 ## Runtime
 
+Перед GLM бот заново открывает все прошедшие фильтры объявления и цепочки
+ссылок подачи (только GET; без отправки заявок). Срок работодателя приоритетнее
+срока размещения на площадке; сохраняются источник, время проверки и расхождения.
+Проверяются `validThrough`, даты/время по Europe/London, 404/410 и closed/expired.
+Год, отсутствующий в объявлении, принимается текущим и явно помечается в отчёте.
+CAPTCHA, недоступная или JS-only страница не считаются подтверждением приёма:
+такие варианты помечаются предупреждением, а при сроке закрытия сегодня
+удерживаются из отчёта до подтверждения. GLM не может переписать эти факты.
+Перед отправкой срок повторно сравнивается с текущим временем.
+
+Повторная проверка сохранённого отчёта без GLM и Telegram:
+
+```bash
+uv run python scripts/verify_report_freshness.py /path/to/nightly-runs/report.json
+```
+
 ```text
 22:00 Europe/London
   -> public Google Drive: download + validate exactly four non-geology CVs
   -> national queries + отдельные Blackpool/Preston/Lancashire/Manchester queries
      across configured providers, включая GOV.UK Find a job и Civil Service Careers
   -> deterministic entry/location/agency filters
+  -> advert + application-link freshness verification
   -> GLM-5.3-Flash full-description assessment
   -> one global comparative rerank of every hard-filtered candidate
   -> Telegram HTML header + one detailed vacancy card per message

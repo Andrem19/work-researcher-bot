@@ -16,11 +16,12 @@ from selectolax.parser import HTMLParser
 
 from . import dedup
 from . import persistence as db
-from .career import classify_career_path, deterministic_assessment
+from .career import classify_career_path, deterministic_assessment, vacancy_status
 from .config import Settings, ensure_dirs
 from .cvmanager import extract_text
 from .domain import JobCard, SearchParams
 from .drive import sync_cvs_from_drive
+from .freshness import verify_cards
 from .llm import assess_batch, rerank_shortlist
 from .providers import run_search
 from .telegram import render_report, send_messages
@@ -209,7 +210,6 @@ def _apply_global_ranking(jobs: list[dict], ranking: list[dict]) -> list[dict]:
                 job["overall_score"] = max(0, min(100, int(final_score)))
         for field in (
             "rank_reason_ru", "entry_evidence", "main_tradeoff_ru",
-            "deadline_urgency", "vacancy_live_confidence",
         ):
             if item.get(field) not in (None, "", []):
                 job[field] = item[field]
@@ -226,6 +226,9 @@ def _build_ranked_jobs(assessment_map: dict[str, dict], candidate_map: dict, set
         if key not in candidate_map:
             continue
         card, base, cv = candidate_map[key]
+        status = vacancy_status(card)
+        if not status["reportable"]:
+            continue
         overall = int(assessment.get("overall_score") or base.get("base_score") or 0)
         glm_recommended = bool(assessment.get("recommended"))
         glm_direct = bool(assessment.get("direct_employer"))
@@ -235,6 +238,8 @@ def _build_ranked_jobs(assessment_map: dict[str, dict], candidate_map: dict, set
             review_tier = "review"
         else:
             review_tier = "fallback"
+        if status["application_check"] == "unverified" and review_tier == "strong":
+            review_tier = "review"
         jobs.append({
             **assessment, "job_key": key, "overall_score": overall,
             "title": card.title, "company": card.company,
@@ -247,14 +252,9 @@ def _build_ranked_jobs(assessment_map: dict[str, dict], candidate_map: dict, set
             "entry_reason": base.get("entry_reason"),
             "location_reason": base.get("location_reason"),
             "requirements_status": base.get("requirements_status"),
-            "deadline": assessment.get("deadline") or base.get("deadline"),
-            "deadline_urgency": (
-                assessment.get("deadline_urgency") or base.get("deadline_urgency")
-            ),
-            "vacancy_live_confidence": (
-                assessment.get("vacancy_live_confidence")
-                or base.get("vacancy_live_confidence")
-            ),
+            **status,
+            "verification_pages": card.extra.get("verification_pages", []),
+            "deadline_evidence": card.extra.get("deadline_evidence", []),
             "contract_type": card.contract_type,
             "posted_at": card.posted_at.isoformat() if card.posted_at else None,
             "description_evidence": (card.description or "")[:1200],
@@ -443,6 +443,26 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
     logger.info("Deterministic screening completed: %d eligible cards", len(candidates))
     logger.info("Career-path screening excluded %d off-route cards", outside_routes)
 
+    # Always inspect full adverts/application links, even with a long search
+    # description. Check all eligible cards before capping so an expired top
+    # result can be replaced by the next live candidate.
+    freshness = await verify_cards([item[1] for item in candidates])
+    freshness_excluded = []
+    verified = []
+    for item, status in zip(candidates, freshness, strict=True):
+        key, card, base = item
+        if not status["reportable"]:
+            freshness_excluded.append({
+                "job_key": key, "title": card.title, "url": card.url, **status,
+                "verification_pages": card.extra.get("verification_pages", []),
+                "deadline_evidence": card.extra.get("deadline_evidence", []),
+            })
+        else:
+            base.update(status)
+            verified.append(item)
+    candidates = verified
+    logger.info("Freshness check: %d retained, %d excluded", len(candidates), len(freshness_excluded))
+
     pool_cards = [record["card"] for record in by_hash.values()]
     async with db.connect(settings.db_path) as conn:
         pool = await dedup.load_pool(conn)
@@ -541,8 +561,18 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
             jobs = _apply_global_ranking(jobs, ranking)
         except Exception as exc:
             logger.warning("GLM global rerank failed; keeping batch-score order: %s", exc)
+    # An explicit cutoff can pass during model calls. Re-evaluate immediately
+    # before delivery; GLM opinions/fallbacks cannot revive a closed vacancy.
+    fresh_jobs = []
+    for job in jobs:
+        status = vacancy_status(candidate_map[job["job_key"]][0])
+        if status["reportable"]:
+            job.update(status)
+            fresh_jobs.append(job)
+        else:
+            freshness_excluded.append({"job_key": job["job_key"], "title": job["title"], **status})
     selected = _select_report_jobs(
-        jobs,
+        fresh_jobs,
         max_jobs=int(settings.report.get("max_jobs", 10)),
         diverse_max_per_path=int(settings.report.get("diverse_max_per_path", 4)),
         diverse_max_per_source=int(settings.report.get("diverse_max_per_source", 5)),
@@ -566,6 +596,7 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
         "deduplicated": len(by_hash), "duplicates_merged": merged,
         "eligible_before_glm": len(llm_items), "reported": len(selected),
         "message_ids": [], "jobs": selected,
+        "freshness_excluded": freshness_excluded,
     }
     _write_run_audit(settings, started, {**result, "delivery_status": "prepared", "messages": messages})
     message_ids = await send_messages(settings, messages) if deliver else []

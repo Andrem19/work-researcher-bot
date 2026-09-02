@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from . import requirements, seller, training
 from .domain import JobCard
@@ -24,21 +25,22 @@ ONSITE_ONLY_RE = re.compile(
     re.I,
 )
 CLOSED_RE = re.compile(
-    r"\b(?:this\s+)?(?:job|role|vacancy|position|advert(?:isement)?)\s+(?:has\s+)?"
+    r"\b(?:this\s+)?(?:job|role|vacancy|position|advert(?:isement)?)\s+(?:(?:has|is)\s+)?(?:now\s+)?"
     r"(?:expired|closed)|\bapplications?\s+(?:are\s+)?(?:now\s+)?closed\b|"
-    r"\bno\s+longer\s+accepting\s+applications?\b",
+    r"\bno\s+longer\s+accepting\s+applications?\b|"
+    r"\b(?:job|vacancy|position)\s+(?:is\s+)?(?:no longer available|not found)\b",
     re.I,
 )
 DEADLINE_LABEL_RE = re.compile(
-    r"\b(?:closing\s+date|application\s+deadline|applications?\s+close|closes)\s*:?[ \t]*"
-    r"([^\n|;]{3,80})",
+    r"\b(?:closing\s+date(?:\s+for\s+applications)?|application\s+deadline|applications?\s+close|closes)"
+    r"[\s:|*]*([^\n|;]{3,100})",
     re.I,
 )
 TEXT_DATE_RE = re.compile(
     r"\b(\d{1,2})(?:st|nd|rd|th)?\s+"
     r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
     r"jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|"
-    r"dec(?:ember)?)\s+(\d{4})\b",
+    r"dec(?:ember)?)(?:\s+(\d{4}))?\b",
     re.I,
 )
 NUMERIC_DATE_RE = re.compile(r"\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})\b")
@@ -150,12 +152,20 @@ def classify_career_path(card: JobCard) -> tuple[str | None, int, list[str]]:
     return path_id, int(result["score"]), result["evidence"]
 
 
-def _parse_deadline(value: str) -> date | None:
+def _parse_deadline(value: str, *, year: int | None = None) -> date | None:
+    iso_match = re.search(r"\b\d{4}-\d{2}-\d{2}(?=T|\b)", value)
+    if iso_match:
+        try:
+            return date.fromisoformat(iso_match.group())
+        except ValueError:
+            return None
     text_match = TEXT_DATE_RE.search(value)
     if text_match:
-        day, month_text, year = text_match.groups()
+        day, month_text, stated_year = text_match.groups()
+        if not stated_year and not year:
+            return None
         try:
-            return date(int(year), MONTHS[month_text[:3].lower()], int(day))
+            return date(int(stated_year or year), MONTHS[month_text[:3].lower()], int(day))
         except ValueError:
             return None
     numeric_match = NUMERIC_DATE_RE.search(value)
@@ -168,25 +178,61 @@ def _parse_deadline(value: str) -> date | None:
     return None
 
 
-def vacancy_status(card: JobCard, *, today: date | None = None) -> dict[str, Any]:
+def _deadline_instant(raw: str, parsed: date) -> datetime | None:
+    """An explicit time is a cutoff; a date alone remains open through that UK day."""
+    iso = re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?", raw)
+    if iso:
+        try:
+            value = datetime.fromisoformat(iso.group().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return value if value.tzinfo else value.replace(tzinfo=ZoneInfo("Europe/London"))
+    match = re.search(r"\b(\d{1,2}):(\d{2})\s*(am|pm)?\b", raw, re.I)
+    if not match:
+        match = re.search(r"\b(\d{1,2})\.(\d{2})\s*(am|pm)\b", raw, re.I)
+    if not match:
+        return None
+    hour, minute, meridiem = match.groups()
+    h = int(hour)
+    if meridiem:
+        h = h % 12 + (12 if meridiem.lower() == "pm" else 0)
+    try:
+        return datetime(parsed.year, parsed.month, parsed.day, h, int(minute), tzinfo=ZoneInfo("Europe/London"))
+    except ValueError:
+        return None
+
+
+def vacancy_status(card: JobCard, *, today: date | None = None, now: datetime | None = None) -> dict[str, Any]:
     """Extract explicit closing evidence without guessing a missing deadline."""
-    # The production run starts at 22:00 UK time, safely away from the UTC date
-    # boundary, so the host-local calendar date is sufficient and portable on
-    # Windows installations without the optional IANA tzdata package.
-    current_date = today or datetime.now().date()
+    current_time = (now or datetime.now(UTC)).astimezone(ZoneInfo("Europe/London"))
+    current_date = today or current_time.date()
     description = card.description or ""
-    extra_deadline = next((
-        card.extra.get(key) for key in (
-            "closing_date", "closingDate", "deadline", "application_deadline",
-        ) if card.extra.get(key)
-    ), None)
-    deadline_text = str(extra_deadline) if extra_deadline else None
-    if deadline_text is None:
-        label_match = DEADLINE_LABEL_RE.search(description)
-        deadline_text = label_match.group(1).strip() if label_match else None
-    deadline = _parse_deadline(deadline_text or "")
-    explicitly_closed = bool(CLOSED_RE.search(description))
+    evidence = list(card.extra.get("deadline_evidence") or [])
+    for key in ("closing_date", "closingDate", "deadline", "application_deadline", "validThrough", "valid_through"):
+        if card.extra.get(key):
+            evidence.append({"raw": str(card.extra[key]), "source_url": card.url, "kind": "listing"})
+    evidence.extend({"raw": m.group(1).strip(), "source_url": card.url, "kind": "description"}
+                    for m in DEADLINE_LABEL_RE.finditer(description))
+    parsed = []
+    for item in evidence:
+        raw = str(item.get("raw") or "")
+        deadline_date = _parse_deadline(raw, year=current_date.year)
+        if deadline_date:
+            parsed.append({**item, "raw": raw, "date": deadline_date})
+    # An employer's explicit deadline supersedes a board's advert expiry.
+    primary = [item for item in parsed if item.get("kind") == "employer"]
+    chosen = min(primary or parsed, key=lambda x: x["date"], default=None)
+    deadline_text = chosen["raw"] if chosen else None
+    deadline = chosen["date"] if chosen else None
+    cutoff = _deadline_instant(deadline_text, deadline) if deadline else None
+    explicitly_closed = bool(CLOSED_RE.search(description) or card.extra.get("vacancy_closed"))
     expired = explicitly_closed or (deadline is not None and deadline < current_date)
+    if cutoff and today is None:
+        expired = expired or cutoff <= current_time
+    check = card.extra.get("application_check", "not_checked")
+    # Same-day board expiry with an inaccessible application page is not a
+    # safe recommendation: the employer may already have closed yesterday.
+    uncertain_due_today = deadline == current_date and check == "unverified"
     days_left = (deadline - current_date).days if deadline is not None else None
     if expired:
         urgency = "expired"
@@ -200,10 +246,22 @@ def vacancy_status(card: JobCard, *, today: date | None = None) -> dict[str, Any
         urgency = "none"
     return {
         "closed": expired,
+        "reportable": not expired and not uncertain_due_today,
+        "freshness_exclusion_reason": (
+            "closed_or_expired" if expired else
+            "deadline_today_application_unverified" if uncertain_due_today else None
+        ),
         "deadline": deadline.isoformat() if deadline else None,
         "deadline_raw": deadline_text,
+        "deadline_source_url": chosen.get("source_url") if chosen else None,
+        "deadline_kind": chosen.get("kind") if chosen else None,
+        "deadline_at": cutoff.astimezone(ZoneInfo("Europe/London")).isoformat() if cutoff else None,
+        "deadline_year_inferred": bool(deadline_text and not re.search(r"\b\d{4}\b", deadline_text)),
+        "deadline_conflict": len({item["date"] for item in parsed}) > 1,
+        "application_check": check,
+        "checked_at": card.extra.get("checked_at"),
         "deadline_urgency": urgency,
-        "vacancy_live_confidence": "low" if expired else ("high" if deadline else "medium"),
+        "vacancy_live_confidence": "low" if expired or check in {"unverified", "not_checked"} else "medium",
     }
 
 

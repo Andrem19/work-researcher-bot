@@ -94,7 +94,24 @@ def render_report(
             f"🧭 <b>Линия:</b> {_value(job.get('path_label'))} | <b>Score:</b> {_value(job.get('overall_score'))}/100\n"
             f"📍 <b>Место:</b> {_value(job.get('location_text'))} | <b>Формат:</b> {_value(_work_mode(job.get('work_mode')))}\n"
             f"💷 <b>Зарплата:</b> {_value(salary, max_chars=100)}\n"
+            + f"⏳ <b>Срок {'работодателя' if job.get('deadline_kind') == 'employer' else 'по объявлению'}:</b> {_value(job.get('deadline_at') or job.get('deadline'))}"
+            + (" (год выведен из текущей даты)" if job.get("deadline_year_inferred") else "")
+            + "\n"
         )
+        check = job.get("application_check")
+        if check == "unverified":
+            common += "⚠️ Приём заявок не подтверждён; страницу подачи проверить вручную.\n"
+        elif check == "listing_checked":
+            common += "🔎 Карточка площадки проверена; срок работодателя может отличаться.\n"
+        elif check == "employer_listing":
+            common += "🔎 Срок подтверждён в каталоге работодателя.\n"
+        elif check == "application_page_checked":
+            common += "🔎 Страница подачи проверена.\n"
+        if job.get("deadline_conflict"):
+            common += "⚠️ Сроки в источниках расходятся; использован срок работодателя или более ранний.\n"
+        deadline_source = job.get("deadline_source_url")
+        if deadline_source:
+            common += f'<a href="{html.escape(deadline_source, quote=True)}">Источник срока</a>\n'
         if index <= detailed_jobs:
             block = (
                 common
@@ -108,8 +125,6 @@ def render_report(
                 + f"⚙️ <b>Особые условия:</b> {_value(job.get('special_conditions'), max_items=2, max_chars=160)}\n"
                 + f"🔐 <b>Работодатель:</b> {_value(job.get('direct_employer_reason'), max_chars=100)}\n"
                 + f"🚩 <b>Замечания:</b> {_value(job.get('rejection_reasons'), max_items=2, max_chars=160)}\n"
-                + f"⏳ <b>Срок подачи:</b> {_value(job.get('deadline'))} | "
-                + f"<b>Срочность:</b> {_value(job.get('deadline_urgency'))}\n"
                 + f"📄 <b>CV:</b> {_value(job.get('cv_filename'))}\n"
                 + f"🔎 <b>Источник:</b> {_value(_source_name(job.get('source')))}"
             )
