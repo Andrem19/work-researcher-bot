@@ -8,7 +8,7 @@ import itertools
 import json
 import logging
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import UTC, datetime
 
 import httpx
@@ -526,6 +526,11 @@ async def run_once(settings: Settings, *, deliver: bool = True, include_seen: bo
         max_jobs=int(settings.report.get("max_jobs", 10)),
         diverse_max_per_path=int(settings.report.get("diverse_max_per_path", 4)),
         diverse_max_per_source=int(settings.report.get("diverse_max_per_source", 5)),
+    )
+    logger.info(
+        "Selected report mix: paths=%s sources=%s",
+        dict(Counter(job["path_id"] for job in selected)),
+        dict(Counter(job["source"] for job in selected)),
     )
 
     messages = render_report(
